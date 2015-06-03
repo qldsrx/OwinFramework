@@ -94,7 +94,7 @@ namespace OwinLight
                                         IEnumerable<RouteAttribute> arrts;
                                         Func<IOwinContext, Task> func;
                                         bool isdone = false;
-                                        arrts = m.GetCustomAttributes<RouteAttribute>();
+                                        arrts = m.GetCustomAttributes<RouteAttribute>(false);
                                         param = m.GetParameters();
                                         if (param.Length == 1)
                                         {
@@ -110,7 +110,7 @@ namespace OwinLight
                                                     }
                                                     else
                                                     {
-                                                        Debug.Write("Any路径重复注册：" + routeattr.Path);
+                                                        Debug.Write(string.Format("Any路径重复注册. path:{0};param:{1};func:{2}", routeattr.Path, param[0].ParameterType.Name, m.Name));
                                                     }
                                                 }
                                                 else if (routeattr.Verbs == "GET")
@@ -123,7 +123,7 @@ namespace OwinLight
                                                     }
                                                     else
                                                     {
-                                                        Debug.Write("Get路径重复注册：" + routeattr.Path);
+                                                        Debug.Write(string.Format("Get路径重复注册. path:{0};param:{1};func:{2}", routeattr.Path, param[0].ParameterType.Name, m.Name));
                                                     }
                                                 }
                                                 else if (routeattr.Verbs == "POST")
@@ -136,7 +136,7 @@ namespace OwinLight
                                                     }
                                                     else
                                                     {
-                                                        Debug.Write("Post路径重复注册：" + routeattr.Path);
+                                                        Debug.Write(string.Format("Post路径重复注册. path:{0};param:{1};func:{2}", routeattr.Path, param[0].ParameterType.Name, m.Name));
                                                     }
                                                 }
                                             }
@@ -146,7 +146,7 @@ namespace OwinLight
                                                 {
                                                     case "Any":
                                                         paramtype = param[0].ParameterType;
-                                                        arrts = paramtype.GetCustomAttributes<RouteAttribute>();
+                                                        arrts = paramtype.GetCustomAttributes<RouteAttribute>(false);
                                                         foreach (var routeattr in arrts)
                                                         {
                                                             if (!_all_route.ContainsKey(routeattr.Path))
@@ -156,13 +156,13 @@ namespace OwinLight
                                                             }
                                                             else
                                                             {
-                                                                Debug.Write("Any路径重复注册：" + routeattr.Path);
+                                                                Debug.Write(string.Format("Any路径重复注册. path:{0};param:{1};func:{2}", routeattr.Path, paramtype.Name, m.Name));
                                                             }
                                                         }
                                                         break;
                                                     case "Get":
                                                         paramtype = param[0].ParameterType;
-                                                        arrts = paramtype.GetCustomAttributes<RouteAttribute>();
+                                                        arrts = paramtype.GetCustomAttributes<RouteAttribute>(false);
                                                         foreach (var routeattr in arrts)
                                                         {
                                                             var get_route = _verb_route["GET"];
@@ -173,13 +173,13 @@ namespace OwinLight
                                                             }
                                                             else
                                                             {
-                                                                Debug.Write("Get路径重复注册：" + routeattr.Path);
+                                                                Debug.Write(string.Format("Get路径重复注册. path:{0};param:{1};func:{2}", routeattr.Path, paramtype.Name, m.Name));
                                                             }
                                                         }
                                                         break;
                                                     case "Post":
                                                         paramtype = param[0].ParameterType;
-                                                        arrts = paramtype.GetCustomAttributes<RouteAttribute>();
+                                                        arrts = paramtype.GetCustomAttributes<RouteAttribute>(false);
                                                         foreach (var routeattr in arrts)
                                                         {
                                                             var post_route = _verb_route["POST"];
@@ -190,7 +190,7 @@ namespace OwinLight
                                                             }
                                                             else
                                                             {
-                                                                Debug.Write("Post路径重复注册：" + routeattr.Path);
+                                                                Debug.Write(string.Format("Post路径重复注册. path:{0};param:{1};func:{2}", routeattr.Path, paramtype.Name, m.Name));
                                                             }
                                                         }
                                                         break;

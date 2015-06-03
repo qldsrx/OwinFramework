@@ -376,7 +376,7 @@ namespace OwinLight
             il.Emit(OpCodes.Ldloc_S, (byte)5);
             il.Emit(OpCodes.Ldloc_S, (byte)6);
             il.Emit(OpCodes.Callvirt, method);
-            if (type3 != null)
+            if (type3 != typeof(void))
             {
                 var nullLabel = il.DefineLabel();
                 var streamLabel = il.DefineLabel();
