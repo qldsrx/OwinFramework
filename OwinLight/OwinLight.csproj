@@ -65,7 +65,7 @@
     <Compile Include="IService.cs" />
     <Compile Include="MimeTypes.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
-    <Compile Include="RegexPathNode.cs" />
+    <Compile Include="RewritePathNode.cs" />
     <Compile Include="RewriteAttribute.cs" />
     <Compile Include="RouteAttribute.cs" />
   </ItemGroup>
