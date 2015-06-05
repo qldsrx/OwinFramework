@@ -11,5 +11,6 @@ namespace OwinLight
     {
         IOwinRequest Request { get; set; }
         IOwinResponse Response { get; set; }
+        bool IsHeadersSended { get; set; }
     }
 }

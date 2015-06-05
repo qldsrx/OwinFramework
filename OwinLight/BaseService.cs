@@ -10,6 +10,20 @@ namespace OwinLight
     public abstract class BaseService : IService
     {
         public IOwinRequest Request { get; set; }
-        public IOwinResponse Response { get; set; }
+
+        IOwinResponse _Response;
+        public IOwinResponse Response
+        {
+            get { return _Response; }
+            set
+            {
+                _Response = value;
+                _Response.OnSendingHeaders(t =>
+                {
+                    IsHeadersSended = true;
+                }, null);
+            }
+        }
+        public bool IsHeadersSended { get; set; }
     }
 }

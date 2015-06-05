@@ -25,7 +25,7 @@ namespace OwinLight.Test
     /// 普通属性接收来自URL或FORM表单的数据，接口属性存储文件，若非POST请求或文件个数为0，则接口属性为空。
     /// </summary>
     [Route("/api/dog1", 65536)]
-    public class DOG1 : IHasHttpFiles, IDisposable
+    public class DOG1 : IHasHttpFiles
     {
         public int? id { get; set; }
         public string name { get; set; }
@@ -36,12 +36,6 @@ namespace OwinLight.Test
         /// 实现IHasHttpFiles，接收来自Form表单提交的文件，可能为空
         /// </summary>
         public List<HttpFile> HttpFiles { get; set; }
-
-        public void Dispose()
-        {
-            Debug.Write("asdf");
-        }
-        ~DOG1() { Debug.Write("1"); }
     }
 
     /// <summary>
@@ -72,36 +66,10 @@ namespace OwinLight.Test
             return x.Task;
         }
 
-        public Task FileGetTest(IOwinContext context, Match match)
-        {
-            var x = new TaskCompletionSource<object>();
-            x.SetResult(null); //调用SetResult后，这个服务即转为完成状态
-            context.Response.ContentType = "text/html; charset=utf-8";
-            FileGet request = new FileGet();
-            if (match.Groups["fileid"].Success)
-            {
-                request.fileid = int.Parse(match.Groups["fileid"].Value);
-            }
-            if (match.Groups["filename"].Success)
-            {
-                request.filename = match.Groups["filename"].Value;
-            }
-            HttpHelper.WritePart(context, string.Format("<h1 style='color:red'>fileid:{0}<br/>filename:{1}</h1>", request.fileid, request.filename));
-            HttpHelper.WritePart(context, match.Groups["asdf"].Success.ToString());
-            return x.Task;
-        }
-
         public Demo1()
         {
             //定义静态路径处理函数，Any表示任意请求类型，Get表示只对GET请求处理，Post表示只对POST请求处理
             Any["/"] = GetRoot;
-        }
-        /// <summary>
-        /// 通过正则注册伪静态路径，目前未做优化处理，慎用！
-        /// </summary>
-        public override void AddRoute(List<Tuple<Regex, Func<IOwinContext, Match, Task>>> routeRegex)
-        {
-            routeRegex.Add(new Tuple<Regex, Func<IOwinContext, Match, Task>>(new Regex("^/api/FileGet/(?<fileid>[^/]+)/(?<filename>[^/]+)$", RegexOptions.Compiled, TimeSpan.FromSeconds(1)), FileGetTest));
         }
     }
 
@@ -126,6 +94,12 @@ namespace OwinLight.Test
             if (request.RequestStream == null) return "1";
             StreamReader sr = new StreamReader(request.RequestStream);
             return sr.ReadToEnd();
+        }
+
+        public void Rewrite(FileGet request)
+        {
+            Response.ContentType = "text/html; charset=utf-8";
+            Response.Write(string.Format("<h1 style='color:red'>fileid:{0}<br/>filename:{1}</h1>", request.fileid, request.filename));
         }
 
         /// <summary>

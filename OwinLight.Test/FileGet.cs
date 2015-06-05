@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 
 namespace OwinLight.Test
 {
+    [Rewrite("/api/FileGet/{fileid}/{filename}")]
     public class FileGet
     {
         public int fileid { get; set; }

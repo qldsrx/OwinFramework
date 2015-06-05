@@ -1,5 +1,6 @@
 ﻿using Microsoft.Owin;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -15,23 +16,20 @@ namespace OwinLight
 {
     public static class HttpHelper
     {
-        //class MatchBag
-        //{
-        //    /// <summary>
-        //    /// 正则关键字
-        //    /// </summary>
-        //    public List<string> keys;
-        //    public Match match;
-        //}
-        class CacheInfo
+        /// <summary>
+        /// 缓存类型读取方法
+        /// </summary>
+        class QCacheInfo
         {
             public Action<object, IReadableStringCollection> Deserializer { get; set; }
 
             public int hitCount;
             public void RecordHit() { Interlocked.Increment(ref hitCount); }
         }
-        static readonly System.Collections.Concurrent.ConcurrentDictionary<Type, CacheInfo> _queryCache = new System.Collections.Concurrent.ConcurrentDictionary<Type, CacheInfo>();
-        private static void SetQueryCache(Type key, CacheInfo value)
+
+        static readonly ConcurrentDictionary<Type, QCacheInfo> _queryCache = new System.Collections.Concurrent.ConcurrentDictionary<Type, QCacheInfo>();
+
+        private static void SetQueryCache(Type key, QCacheInfo value)
         {
             if (Interlocked.Increment(ref collect) == COLLECT_PER_ITEMS)
             {
@@ -48,7 +46,7 @@ namespace OwinLight
                 {
                     if (pair.Value.hitCount <= COLLECT_HIT_COUNT_MIN)
                     {
-                        CacheInfo cache;
+                        QCacheInfo cache;
                         _queryCache.TryRemove(pair.Key, out cache);
                     }
                 }
@@ -58,10 +56,11 @@ namespace OwinLight
                 Interlocked.Exchange(ref collect, 0);
             }
         }
+
         private const int COLLECT_PER_ITEMS = 1000, COLLECT_HIT_COUNT_MIN = 0;
         private static int collect;
 
-        private static bool TryGetQueryCache(Type key, out CacheInfo value)
+        private static bool TryGetQueryCache(Type key, out QCacheInfo value)
         {
             if (_queryCache.TryGetValue(key, out value))
             {
@@ -98,7 +97,7 @@ namespace OwinLight
                         .Where(p => p.GetIndexParameters().Any() && p.GetIndexParameters()[0].ParameterType == typeof(int))
                         .Select(p => p.GetGetMethod()).First();
 
-        public static Action<object, IReadableStringCollection> GetTypeDeserializer(Type type, IReadableStringCollection query)
+        static Action<object, IReadableStringCollection> GetTypeDeserializer(Type type)
         {
             var dm = new DynamicMethod(string.Format("Deserialize{0}", Guid.NewGuid()), null, new[] { typeof(object), typeof(IReadableStringCollection) }, true);
             var properties = GetSettableProps(type);
@@ -175,6 +174,77 @@ namespace OwinLight
             return (Action<object, IReadableStringCollection>)dm.CreateDelegate(typeof(Action<object, IReadableStringCollection>));
         }
 
+        //static Action<object, string[]> GetTypeDeserializerFromArray(Type type, List<Tuple<string, int>> keys)
+        static DynamicMethod GetTypeDeserializerFromArray(Type type, List<Tuple<string, int>> keys)
+        {
+            var dm = new DynamicMethod(string.Format("Deserialize{0}", Guid.NewGuid()), null, new[] { typeof(object), typeof(string[]) }, true);
+            var properties = GetSettableProps(type);
+            var setters = (
+                from n in keys
+                let prop = properties.FirstOrDefault(p => string.Equals(p.Name, n.Item1, StringComparison.OrdinalIgnoreCase))
+                select new { Name = n, Property = prop }
+              ).ToList();
+            var il = dm.GetILGenerator();
+            il.DeclareLocal(typeof(IList<string>)); //0
+            il.DeclareLocal(typeof(string)); //1
+            il.DeclareLocal(type);//2
+            il.Emit(OpCodes.Ldarg_0);// [object]
+            il.Emit(OpCodes.Isinst, type);// [target]
+            il.Emit(OpCodes.Stloc_2);
+            foreach (var item in setters)
+            {
+                Type memberType = item.Property.Type;
+                var nullUnderlyingType = Nullable.GetUnderlyingType(memberType);
+                var unboxType = nullUnderlyingType != null ? nullUnderlyingType : memberType;
+
+                MethodInfo getMethod = null;
+                if (unboxType.IsEnum)
+                {
+                    getMethod = methods[typeof(Enum)];
+                }
+                else if (!unboxType.IsArray) //不处理数组
+                {
+                    methods.TryGetValue(unboxType, out getMethod);
+                }
+                if (getMethod != null)
+                {
+                    var label1 = il.DefineLabel();
+                    il.Emit(OpCodes.Ldarg_1);// [string[]]
+                    il.Emit(OpCodes.Ldc_I4, item.Name.Item2);// [string[]][index]
+                    il.Emit(OpCodes.Ldelem_Ref);//[string]
+                    il.Emit(OpCodes.Dup);
+                    il.Emit(OpCodes.Stloc_1);
+                    il.Emit(OpCodes.Brfalse_S, label1);// stack is empty
+                    il.Emit(OpCodes.Ldloc_1);
+                    il.Emit(OpCodes.Callvirt, typeof(string).GetProperty("Length").GetGetMethod());
+                    il.Emit(OpCodes.Brfalse_S, label1);// stack is empty
+                    il.Emit(OpCodes.Ldloc_2);// [target]
+                    il.Emit(OpCodes.Ldloc_1);// [target][string]
+                    if (unboxType.IsEnum)
+                    {
+                        il.Emit(OpCodes.Ldtoken, unboxType); // [target][string][enum-type-token]
+                        il.EmitCall(OpCodes.Call, typeof(Type).GetMethod("GetTypeFromHandle"), null);// [target][string][enum-type]
+                    }
+                    il.Emit(OpCodes.Call, getMethod);//[target]([unbox-value]/[enum-object])
+                    if (unboxType.IsEnum)
+                    {
+                        il.Emit(OpCodes.Unbox_Any, unboxType); // [target][typed-value]
+                    }
+                    if (nullUnderlyingType != null)
+                    {
+                        il.Emit(OpCodes.Newobj, memberType.GetConstructor(new[] { nullUnderlyingType }));// [target][value]
+                    }
+
+                    il.Emit(OpCodes.Callvirt, item.Property.Setter); // stack is now [target]
+
+                    il.MarkLabel(label1);// stack is empty
+                }
+            }
+            il.Emit(OpCodes.Ret);
+            //return (Action<object, string[]>)dm.CreateDelegate(typeof(Action<object, string[]>));
+            return dm;
+        }
+
         public static Func<IOwinContext, Task> GetOwinTask(Type type1, Type type2, Type type3, MethodInfo method, int maxlength)
         {
             var dm = new DynamicMethod(string.Format("OwinTask{0}", Guid.NewGuid()), typeof(Task), new[] { typeof(IOwinContext) }, true);
@@ -249,7 +319,7 @@ namespace OwinLight
                 il.Emit(OpCodes.Br, label5);// stack is empty
             }
             else if (typeof(IHasRequestStream).IsAssignableFrom(type2))
-            {                
+            {
                 il.Emit(OpCodes.Ldloc_S, (byte)6);
                 il.Emit(OpCodes.Ldloc_S, (byte)9);
                 il.Emit(OpCodes.Callvirt, typeof(IHasRequestStream).GetProperty("RequestStream").GetSetMethod());
@@ -339,7 +409,7 @@ namespace OwinLight
             il.Emit(OpCodes.Call, typeof(Encoding).GetProperty("UTF8").GetGetMethod());
             il.Emit(OpCodes.Ldloc_S, (byte)4);
             il.Emit(OpCodes.Callvirt, typeof(Encoding).GetMethod("GetString", new[] { typeof(byte[]) }));
-            il.Emit(OpCodes.Call, typeof(ServiceStack.StringExtensions).GetMethod("FromXml", new[] { typeof(string) }).MakeGenericMethod(type2));
+            il.Emit(OpCodes.Call, typeof(ServiceStack.Text.StringExtensions).GetMethod("FromXml", new[] { typeof(string) }).MakeGenericMethod(type2));
             il.Emit(OpCodes.Stloc_S, (byte)6);
             il.Emit(OpCodes.Leave_S, next);// stack is empty
 
@@ -347,7 +417,7 @@ namespace OwinLight
             il.Emit(OpCodes.Call, typeof(Encoding).GetProperty("UTF8").GetGetMethod());
             il.Emit(OpCodes.Ldloc_S, (byte)4);
             il.Emit(OpCodes.Callvirt, typeof(Encoding).GetMethod("GetString", new[] { typeof(byte[]) }));
-            il.Emit(OpCodes.Call, typeof(ServiceStack.StringExtensions).GetMethod("FromJson", new[] { typeof(string) }).MakeGenericMethod(type2));
+            il.Emit(OpCodes.Call, typeof(ServiceStack.Text.StringExtensions).GetMethod("FromJson", new[] { typeof(string) }).MakeGenericMethod(type2));
             il.Emit(OpCodes.Stloc_S, (byte)6);
             il.Emit(OpCodes.Leave_S, next);// stack is empty
 
@@ -382,6 +452,8 @@ namespace OwinLight
                 var streamLabel = il.DefineLabel();
                 var stringLabel = il.DefineLabel();
                 var label10 = il.DefineLabel();
+                var headsend1 = il.DefineLabel();
+                var headsend2 = il.DefineLabel();
                 il.Emit(OpCodes.Dup);//[object][object]
                 il.Emit(OpCodes.Ldnull);
                 il.Emit(OpCodes.Ceq);
@@ -392,7 +464,8 @@ namespace OwinLight
                 il.Emit(OpCodes.Dup);
                 il.Emit(OpCodes.Isinst, typeof(Stream));//[object][Stream or null]
                 il.Emit(OpCodes.Brtrue_S, streamLabel);//[object]
-                il.Emit(OpCodes.Call, typeof(ServiceStack.StringExtensions).GetMethod("ToJson").MakeGenericMethod(type3));
+                il.Emit(OpCodes.Call, typeof(ServiceStack.Text.StringExtensions).GetMethod("ToJson").MakeGenericMethod(type3));
+
                 il.Emit(OpCodes.Ldloc_1);
                 il.Emit(OpCodes.Callvirt, typeof(IOwinResponse).GetProperty("ContentType").GetGetMethod());
                 il.Emit(OpCodes.Brtrue_S, label10);
@@ -417,17 +490,24 @@ namespace OwinLight
                 il.Emit(OpCodes.Callvirt, typeof(Encoding).GetMethod("GetBytes", new[] { typeof(string) }));//[IOwinResponse][byte[]]
                 il.Emit(OpCodes.Dup);//[IOwinResponse][byte[]][byte[]]
                 il.Emit(OpCodes.Stloc_S, (byte)4);//[IOwinResponse][byte[]]
+                il.Emit(OpCodes.Ldloc_S, (byte)5);
+                il.Emit(OpCodes.Callvirt, typeof(IService).GetProperty("IsHeadersSended").GetGetMethod());
+                il.Emit(OpCodes.Brtrue_S, headsend1);//已经发送过http头的话，就不设置文档长度
                 il.Emit(OpCodes.Ldloc_1);//[IOwinResponse][byte[]][IOwinResponse]
                 il.Emit(OpCodes.Ldloc_S, (byte)4);//[IOwinResponse][byte[]][IOwinResponse][byte[]]
                 il.Emit(OpCodes.Callvirt, typeof(byte[]).GetProperty("LongLength").GetGetMethod());
                 il.Emit(OpCodes.Newobj, typeof(long?).GetConstructor(new[] { typeof(long) }));//[IOwinResponse][byte[]][IOwinResponse][long?]
                 il.Emit(OpCodes.Callvirt, typeof(IOwinResponse).GetProperty("ContentLength").GetSetMethod());
+                il.MarkLabel(headsend1);
                 il.Emit(OpCodes.Callvirt, typeof(IOwinResponse).GetMethod("Write", new[] { typeof(byte[]) }));
                 il.Emit(OpCodes.Br_S, alldone);// stack is empty
 
                 il.MarkLabel(streamLabel);//[object]
                 il.Emit(OpCodes.Castclass, typeof(Stream));
                 il.Emit(OpCodes.Stloc_S, (byte)9);
+                il.Emit(OpCodes.Ldloc_S, (byte)5);
+                il.Emit(OpCodes.Callvirt, typeof(IService).GetProperty("IsHeadersSended").GetGetMethod());
+                il.Emit(OpCodes.Brtrue_S, headsend2);//已经发送过http头的话，就不设置文档长度
                 il.BeginExceptionBlock();//获取流长度，设置ContentLength，失败也无所谓，忽略异常
                 il.Emit(OpCodes.Ldloc_1);
                 il.Emit(OpCodes.Ldloc_S, (byte)9);
@@ -440,6 +520,7 @@ namespace OwinLight
                 il.BeginCatchBlock(typeof(object));
                 il.EndExceptionBlock();
                 il.BeginExceptionBlock();//捕获输出异常，最终处理IDisposable
+                il.MarkLabel(headsend2);
                 il.Emit(OpCodes.Ldloc_S, (byte)9);
                 il.Emit(OpCodes.Ldloc_1);
                 il.Emit(OpCodes.Callvirt, typeof(IOwinResponse).GetProperty("Body").GetGetMethod());
@@ -454,6 +535,9 @@ namespace OwinLight
 
                 il.MarkLabel(nullLabel);//[object]
                 il.Emit(OpCodes.Pop);// stack is empty
+                il.Emit(OpCodes.Ldloc_S, (byte)5);
+                il.Emit(OpCodes.Callvirt, typeof(IService).GetProperty("IsHeadersSended").GetGetMethod());
+                il.Emit(OpCodes.Brtrue_S, alldone);//已经发送过http头的话，就不设置文档长度
                 il.Emit(OpCodes.Ldloc_1);
                 il.Emit(OpCodes.Ldc_I8, 0L);
                 il.Emit(OpCodes.Newobj, typeof(long?).GetConstructor(new[] { typeof(long) }));
@@ -461,6 +545,9 @@ namespace OwinLight
             }
             else
             {
+                il.Emit(OpCodes.Ldloc_S, (byte)5);
+                il.Emit(OpCodes.Callvirt, typeof(IService).GetProperty("IsHeadersSended").GetGetMethod());
+                il.Emit(OpCodes.Brtrue_S, alldone);//已经发送过http头的话，就不设置文档长度
                 il.Emit(OpCodes.Ldloc_1);
                 il.Emit(OpCodes.Ldc_I8, 0L);
                 il.Emit(OpCodes.Newobj, typeof(long?).GetConstructor(new[] { typeof(long) }));
@@ -480,6 +567,314 @@ namespace OwinLight
             il.Emit(OpCodes.Ldloc_S, (byte)10);
             il.Emit(OpCodes.Ret);//[Task]            
             return (Func<IOwinContext, Task>)dm.CreateDelegate(typeof(Func<IOwinContext, Task>));
+        }
+
+        public static Func<IOwinContext, string[], Task> GetOwinRewriteTask(Type type1, Type type2, Type type3, MethodInfo method, int maxlength, List<Tuple<string, int>> keys)
+        {
+            var deserializer = GetTypeDeserializerFromArray(type2, keys);
+            var dm = new DynamicMethod(string.Format("OwinRegexTask{0}", Guid.NewGuid()), typeof(Task), new[] { typeof(IOwinContext), typeof(string[]) }, true);
+            ILGenerator il = dm.GetILGenerator();
+            var alldone = il.DefineLabel();
+            var next = il.DefineLabel();
+            var retlabel = il.DefineLabel();
+            var label1 = il.DefineLabel();
+            var label2 = il.DefineLabel();
+            var label3 = il.DefineLabel();
+            var label4 = il.DefineLabel();
+            var label5 = il.DefineLabel();
+            var label6 = il.DefineLabel();
+            var label7 = il.DefineLabel();
+            il.DeclareLocal(typeof(IOwinRequest));//0
+            il.DeclareLocal(typeof(IOwinResponse));//1
+            il.DeclareLocal(typeof(string));//2
+            il.DeclareLocal(typeof(int));//3
+            il.DeclareLocal(typeof(byte[]));//4
+            il.DeclareLocal(type1);//5
+            il.DeclareLocal(type2);//6            
+            il.DeclareLocal(typeof(ReadableStringCollection));//7
+            il.DeclareLocal(typeof(List<HttpFile>));//8
+            il.DeclareLocal(typeof(Stream));//9
+            il.DeclareLocal(typeof(Task));//10
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Dup);
+            il.Emit(OpCodes.Callvirt, typeof(IOwinContext).GetProperty("Request").GetGetMethod());
+            il.Emit(OpCodes.Stloc_0);
+            il.Emit(OpCodes.Callvirt, typeof(IOwinContext).GetProperty("Response").GetGetMethod());
+            il.Emit(OpCodes.Stloc_1);
+            il.Emit(OpCodes.Newobj, type1.GetConstructor(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, Type.EmptyTypes, null));
+            il.Emit(OpCodes.Stloc_S, (byte)5);
+            if (typeof(IDisposable).IsAssignableFrom(type1))
+                il.BeginExceptionBlock();//stack is empty，to deal with IDisposable
+            il.Emit(OpCodes.Ldloc_S, (byte)5);//[typed-object1]
+            il.Emit(OpCodes.Dup);//[typed-object1][typed-object1]            
+            il.Emit(OpCodes.Ldloc_0);
+            il.Emit(OpCodes.Callvirt, typeof(IService).GetProperty("Request").GetSetMethod());
+            il.Emit(OpCodes.Ldloc_1);
+            il.Emit(OpCodes.Callvirt, typeof(IService).GetProperty("Response").GetSetMethod()); // stack is empty
+            il.Emit(OpCodes.Newobj, type2.GetConstructor(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, Type.EmptyTypes, null));
+            il.Emit(OpCodes.Dup);
+            il.Emit(OpCodes.Stloc_S, (byte)6);//store type2
+            il.Emit(OpCodes.Ldarg_1);//[type2][string[]]
+            il.Emit(OpCodes.Call, deserializer);
+            il.Emit(OpCodes.Ldloc_0);
+            il.Emit(OpCodes.Callvirt, typeof(IOwinRequest).GetProperty("Method").GetGetMethod());
+            il.Emit(OpCodes.Ldstr, "POST");
+            il.Emit(OpCodes.Call, typeof(String).GetMethod("Equals", new[] { typeof(string), typeof(string) }));
+            il.Emit(OpCodes.Brfalse, next);
+            il.Emit(OpCodes.Ldloc_0);
+            il.Emit(OpCodes.Callvirt, typeof(IOwinRequest).GetProperty("Headers").GetGetMethod());
+            il.Emit(OpCodes.Ldstr, "Content-Length");
+            il.Emit(OpCodes.Callvirt, typeof(IReadableStringCollection).GetMethod("Get"));
+            il.Emit(OpCodes.Dup);
+            il.Emit(OpCodes.Stloc_2);
+            il.Emit(OpCodes.Brfalse, label1);// stack is empty 判断是否为空，为空则取消任务
+            il.Emit(OpCodes.Ldloc_2);
+            il.Emit(OpCodes.Ldloca_S, (byte)3);
+            il.Emit(OpCodes.Call, typeof(int).GetMethod("TryParse", new[] { typeof(string), typeof(Int32).MakeByRefType() }));
+            il.Emit(OpCodes.Brfalse, label1);//stack is empty
+            il.Emit(OpCodes.Ldloc_3);
+            il.Emit(OpCodes.Brfalse, next);//stack is empty,if Content-Length == 0,then goto next
+            il.Emit(OpCodes.Ldloc_0);
+            il.Emit(OpCodes.Callvirt, typeof(IOwinRequest).GetProperty("Body").GetGetMethod());
+            il.Emit(OpCodes.Stloc_S, (byte)9); //stack is empty, store RequestStream
+            if (typeof(IHasRequestStream).IsAssignableFrom(type2))
+            {
+                il.Emit(OpCodes.Ldloc_S, (byte)6);
+                il.Emit(OpCodes.Ldloc_S, (byte)9);
+                il.Emit(OpCodes.Callvirt, typeof(IHasRequestStream).GetProperty("RequestStream").GetSetMethod());
+                il.Emit(OpCodes.Br, next);// stack is empty,下面去读取url部分参数
+            }
+            il.Emit(OpCodes.Ldloc_3);
+            il.Emit(OpCodes.Ldc_I4, maxlength);
+            il.Emit(OpCodes.Cgt);
+            il.Emit(OpCodes.Brtrue, label1);//stack is empty,超过限制后不处理请求
+            il.Emit(OpCodes.Ldloc_S, (byte)9);
+            il.Emit(OpCodes.Ldloc_3);
+            il.Emit(OpCodes.Newarr, typeof(byte));
+            il.Emit(OpCodes.Dup);
+            il.Emit(OpCodes.Stloc_S, (byte)4);
+            il.Emit(OpCodes.Ldc_I4_0);
+            il.Emit(OpCodes.Ldloc_3);
+            il.Emit(OpCodes.Callvirt, typeof(Stream).GetMethod("Read", new[] { typeof(byte[]), typeof(int), typeof(int) }));
+            il.Emit(OpCodes.Ldloc_3);
+            il.Emit(OpCodes.Ceq);
+            il.Emit(OpCodes.Brfalse, label1);// stack is empty
+            il.BeginExceptionBlock();
+            il.Emit(OpCodes.Ldloc_0);
+            il.Emit(OpCodes.Callvirt, typeof(IOwinRequest).GetProperty("ContentType").GetGetMethod());
+            il.Emit(OpCodes.Dup);
+            il.Emit(OpCodes.Stloc_2);
+            il.Emit(OpCodes.Brfalse, label4);
+            il.Emit(OpCodes.Ldloc_2);
+            il.Emit(OpCodes.Ldstr, "x-www-form-urlencoded");
+            il.Emit(OpCodes.Callvirt, typeof(String).GetMethod("Contains"));
+            il.Emit(OpCodes.Brfalse_S, label6);// stack is empty
+            il.Emit(OpCodes.Ldloc_S, (byte)6);
+            il.Emit(OpCodes.Call, typeof(Encoding).GetProperty("UTF8").GetGetMethod());
+            il.Emit(OpCodes.Ldloc_S, (byte)4);
+            il.Emit(OpCodes.Callvirt, typeof(Encoding).GetMethod("GetString", new[] { typeof(byte[]) }));
+            il.Emit(OpCodes.Call, typeof(Microsoft.Owin.Helpers.WebHelpers).GetMethod("ParseForm", new[] { typeof(string) }));
+            il.Emit(OpCodes.Call, typeof(HttpHelper).GetMethod("Fill").MakeGenericMethod(type2));
+            il.Emit(OpCodes.Leave, next);// stack is empty
+
+            il.MarkLabel(label6);// stack is empty,处理multipart/form-data
+            il.Emit(OpCodes.Ldloc_2);
+            il.Emit(OpCodes.Ldstr, "multipart/form-data");
+            il.Emit(OpCodes.Callvirt, typeof(String).GetMethod("Contains"));
+            il.Emit(OpCodes.Brfalse_S, label2);// stack is empty
+            il.Emit(OpCodes.Ldloc_S, (byte)4);
+            il.Emit(OpCodes.Newobj, typeof(MemoryStream).GetConstructor(new[] { typeof(byte[]) }));
+            il.Emit(OpCodes.Ldloc_2);
+            il.Emit(OpCodes.Ldloca_S, (byte)7);
+            il.Emit(OpCodes.Ldloca_S, (byte)8);
+            il.Emit(OpCodes.Call, typeof(HttpHelper).GetMethod("ParseFormData"));
+            il.Emit(OpCodes.Ldloc_S, (byte)6);
+            il.Emit(OpCodes.Ldloc_S, (byte)7);
+            il.Emit(OpCodes.Call, typeof(HttpHelper).GetMethod("Fill").MakeGenericMethod(type2));
+            if (typeof(IHasHttpFiles).IsAssignableFrom(type2))
+            {
+                il.Emit(OpCodes.Ldloc_S, (byte)8);
+                il.Emit(OpCodes.Callvirt, typeof(List<HttpFile>).GetProperty("Count").GetGetMethod());
+                il.Emit(OpCodes.Brfalse_S, label7);
+                il.Emit(OpCodes.Ldloc_S, (byte)6);
+                il.Emit(OpCodes.Ldloc_S, (byte)8);
+                il.Emit(OpCodes.Callvirt, typeof(IHasHttpFiles).GetProperty("HttpFiles").GetSetMethod());
+                il.MarkLabel(label7);
+            }
+            il.Emit(OpCodes.Leave_S, next);// stack is empty
+
+            il.MarkLabel(label2);// stack is empty,处理xml反序列化
+            il.Emit(OpCodes.Ldloc_2);
+            il.Emit(OpCodes.Ldstr, "xml");
+            il.Emit(OpCodes.Callvirt, typeof(String).GetMethod("Contains"));
+            il.Emit(OpCodes.Brtrue_S, label3);// stack is empty
+            il.Emit(OpCodes.Ldloc_0);
+            il.Emit(OpCodes.Callvirt, typeof(IOwinRequest).GetProperty("Headers").GetGetMethod());
+            il.Emit(OpCodes.Ldstr, "format");
+            il.Emit(OpCodes.Callvirt, typeof(IReadableStringCollection).GetMethod("Get"));
+            il.Emit(OpCodes.Ldstr, "xml");
+            il.Emit(OpCodes.Call, typeof(String).GetMethod("Equals", new[] { typeof(string), typeof(string) }));
+            il.Emit(OpCodes.Brfalse_S, label4);
+
+            il.MarkLabel(label3);// stack is empty,处理json反序列化
+            il.Emit(OpCodes.Call, typeof(Encoding).GetProperty("UTF8").GetGetMethod());
+            il.Emit(OpCodes.Ldloc_S, (byte)4);
+            il.Emit(OpCodes.Callvirt, typeof(Encoding).GetMethod("GetString", new[] { typeof(byte[]) }));
+            il.Emit(OpCodes.Call, typeof(ServiceStack.Text.StringExtensions).GetMethod("FromXml", new[] { typeof(string) }).MakeGenericMethod(type2));
+            il.Emit(OpCodes.Stloc_S, (byte)6);
+            il.Emit(OpCodes.Leave_S, next);// stack is empty
+
+            il.MarkLabel(label4);// stack is empty
+            il.Emit(OpCodes.Call, typeof(Encoding).GetProperty("UTF8").GetGetMethod());
+            il.Emit(OpCodes.Ldloc_S, (byte)4);
+            il.Emit(OpCodes.Callvirt, typeof(Encoding).GetMethod("GetString", new[] { typeof(byte[]) }));
+            il.Emit(OpCodes.Call, typeof(ServiceStack.Text.StringExtensions).GetMethod("FromJson", new[] { typeof(string) }).MakeGenericMethod(type2));
+            il.Emit(OpCodes.Stloc_S, (byte)6);
+            il.Emit(OpCodes.Leave_S, next);// stack is empty
+
+            il.BeginCatchBlock(typeof(Exception)); // stack is Exception
+#if DEBUG
+            il.Emit(OpCodes.Callvirt, typeof(Object).GetMethod("ToString"));
+            il.Emit(OpCodes.Ldnull);
+            il.Emit(OpCodes.Call, typeof(Debug).GetMethod("Write"));
+#endif
+            il.EndExceptionBlock();
+
+            il.MarkLabel(label1);// stack is empty
+            il.Emit(OpCodes.Ldsfld, typeof(HttpHelper).GetField("cancelTask"));
+            il.Emit(OpCodes.Stloc_S, (byte)10);//store in local variable
+            il.Emit(OpCodes.Br, retlabel);
+
+            il.MarkLabel(next);// stack is empty
+            il.Emit(OpCodes.Ldloc_S, (byte)6);
+            il.Emit(OpCodes.Ldloc_0);
+            il.Emit(OpCodes.Callvirt, typeof(IOwinRequest).GetProperty("Query").GetGetMethod());
+            il.Emit(OpCodes.Call, typeof(HttpHelper).GetMethod("Fill").MakeGenericMethod(type2));
+            il.MarkLabel(label5);// stack is empty
+            il.Emit(OpCodes.Ldloc_S, (byte)5);
+            il.Emit(OpCodes.Ldloc_S, (byte)6);
+            il.Emit(OpCodes.Callvirt, method);            
+            if (type3 != typeof(void))
+            {
+                var nullLabel = il.DefineLabel();
+                var streamLabel = il.DefineLabel();
+                var stringLabel = il.DefineLabel();
+                var label10 = il.DefineLabel();
+                var headsend1 = il.DefineLabel();
+                var headsend2 = il.DefineLabel();
+                il.Emit(OpCodes.Dup);//[object][object]
+                il.Emit(OpCodes.Ldnull);
+                il.Emit(OpCodes.Ceq);
+                il.Emit(OpCodes.Brtrue, nullLabel);//[object] 如果对象为空引用，则直接返回0字节响应。
+                il.Emit(OpCodes.Dup);//[object][object]
+                il.Emit(OpCodes.Isinst, typeof(string)); //测试是否是字符串，字符串就不需要序列化了。
+                il.Emit(OpCodes.Brtrue_S, stringLabel);//[object]
+                il.Emit(OpCodes.Dup);
+                il.Emit(OpCodes.Isinst, typeof(Stream));//[object][Stream or null]
+                il.Emit(OpCodes.Brtrue_S, streamLabel);//[object]
+                il.Emit(OpCodes.Call, typeof(ServiceStack.Text.StringExtensions).GetMethod("ToJson").MakeGenericMethod(type3));
+
+                il.Emit(OpCodes.Ldloc_1);
+                il.Emit(OpCodes.Callvirt, typeof(IOwinResponse).GetProperty("ContentType").GetGetMethod());
+                il.Emit(OpCodes.Brtrue_S, label10);
+                il.Emit(OpCodes.Ldloc_1);
+                il.Emit(OpCodes.Ldstr, "text/json; charset=utf-8");
+                il.Emit(OpCodes.Callvirt, typeof(IOwinResponse).GetProperty("ContentType").GetSetMethod());
+                il.Emit(OpCodes.Br_S, label10);
+
+                il.MarkLabel(stringLabel);//[object]
+                il.Emit(OpCodes.Ldloc_1);
+                il.Emit(OpCodes.Callvirt, typeof(IOwinResponse).GetProperty("ContentType").GetGetMethod());
+                il.Emit(OpCodes.Brtrue_S, label10);
+                il.Emit(OpCodes.Ldloc_1);
+                il.Emit(OpCodes.Ldstr, "text/plain; charset=utf-8");
+                il.Emit(OpCodes.Callvirt, typeof(IOwinResponse).GetProperty("ContentType").GetSetMethod());
+                il.MarkLabel(label10);
+                il.Emit(OpCodes.Castclass, typeof(string));
+                il.Emit(OpCodes.Stloc_2);
+                il.Emit(OpCodes.Ldloc_1);//[IOwinResponse]
+                il.Emit(OpCodes.Call, typeof(Encoding).GetProperty("UTF8").GetGetMethod());
+                il.Emit(OpCodes.Ldloc_2);
+                il.Emit(OpCodes.Callvirt, typeof(Encoding).GetMethod("GetBytes", new[] { typeof(string) }));//[IOwinResponse][byte[]]
+                il.Emit(OpCodes.Dup);//[IOwinResponse][byte[]][byte[]]
+                il.Emit(OpCodes.Stloc_S, (byte)4);//[IOwinResponse][byte[]]
+                il.Emit(OpCodes.Ldloc_S, (byte)5);
+                il.Emit(OpCodes.Callvirt, typeof(IService).GetProperty("IsHeadersSended").GetGetMethod());
+                il.Emit(OpCodes.Brtrue_S, headsend1);//已经发送过http头的话，就不设置文档长度
+                il.Emit(OpCodes.Ldloc_1);//[IOwinResponse][byte[]][IOwinResponse]
+                il.Emit(OpCodes.Ldloc_S, (byte)4);//[IOwinResponse][byte[]][IOwinResponse][byte[]]
+                il.Emit(OpCodes.Callvirt, typeof(byte[]).GetProperty("LongLength").GetGetMethod());
+                il.Emit(OpCodes.Newobj, typeof(long?).GetConstructor(new[] { typeof(long) }));//[IOwinResponse][byte[]][IOwinResponse][long?]
+                il.Emit(OpCodes.Callvirt, typeof(IOwinResponse).GetProperty("ContentLength").GetSetMethod());
+                il.MarkLabel(headsend1);
+                il.Emit(OpCodes.Callvirt, typeof(IOwinResponse).GetMethod("Write", new[] { typeof(byte[]) }));
+                il.Emit(OpCodes.Br_S, alldone);// stack is empty
+
+                il.MarkLabel(streamLabel);//[object]
+                il.Emit(OpCodes.Castclass, typeof(Stream));
+                il.Emit(OpCodes.Stloc_S, (byte)9);
+                il.Emit(OpCodes.Ldloc_S, (byte)5);
+                il.Emit(OpCodes.Callvirt, typeof(IService).GetProperty("IsHeadersSended").GetGetMethod());
+                il.Emit(OpCodes.Brtrue_S, headsend2);//已经发送过http头的话，就不设置文档长度
+                il.BeginExceptionBlock();//获取流长度，设置ContentLength，失败也无所谓，忽略异常
+                il.Emit(OpCodes.Ldloc_1);
+                il.Emit(OpCodes.Ldloc_S, (byte)9);
+                il.Emit(OpCodes.Callvirt, typeof(Stream).GetProperty("Length").GetGetMethod());
+                il.Emit(OpCodes.Ldloc_S, (byte)9);
+                il.Emit(OpCodes.Callvirt, typeof(Stream).GetProperty("Position").GetGetMethod());
+                il.Emit(OpCodes.Sub);
+                il.Emit(OpCodes.Newobj, typeof(long?).GetConstructor(new[] { typeof(long) }));
+                il.Emit(OpCodes.Callvirt, typeof(IOwinResponse).GetProperty("ContentLength").GetSetMethod());
+                il.BeginCatchBlock(typeof(object));
+                il.EndExceptionBlock();
+                il.BeginExceptionBlock();//捕获输出异常，最终处理IDisposable
+                il.MarkLabel(headsend2);
+                il.Emit(OpCodes.Ldloc_S, (byte)9);
+                il.Emit(OpCodes.Ldloc_1);
+                il.Emit(OpCodes.Callvirt, typeof(IOwinResponse).GetProperty("Body").GetGetMethod());
+                il.Emit(OpCodes.Callvirt, typeof(Stream).GetMethod("CopyTo", new[] { typeof(Stream) }));
+                il.BeginFinallyBlock();
+                il.Emit(OpCodes.Ldloc_S, (byte)9);
+                il.Emit(OpCodes.Callvirt, typeof(Stream).GetMethod("Close"));
+                il.Emit(OpCodes.Ldloc_S, (byte)9);
+                il.Emit(OpCodes.Callvirt, typeof(IDisposable).GetMethod("Dispose"));
+                il.EndExceptionBlock();
+                il.Emit(OpCodes.Br_S, alldone);// stack is empty
+
+                il.MarkLabel(nullLabel);//[object]
+                il.Emit(OpCodes.Pop);// stack is empty
+                il.Emit(OpCodes.Ldloc_S, (byte)5);
+                il.Emit(OpCodes.Callvirt, typeof(IService).GetProperty("IsHeadersSended").GetGetMethod());
+                il.Emit(OpCodes.Brtrue_S, alldone);//已经发送过http头的话，就不设置文档长度
+                il.Emit(OpCodes.Ldloc_1);
+                il.Emit(OpCodes.Ldc_I8, 0L);
+                il.Emit(OpCodes.Newobj, typeof(long?).GetConstructor(new[] { typeof(long) }));
+                il.Emit(OpCodes.Callvirt, typeof(IOwinResponse).GetProperty("ContentLength").GetSetMethod());
+            }
+            else
+            {
+                il.Emit(OpCodes.Ldloc_S,(byte)5);
+                il.Emit(OpCodes.Callvirt, typeof(IService).GetProperty("IsHeadersSended").GetGetMethod());
+                il.Emit(OpCodes.Brtrue_S, alldone);//已经发送过http头的话，就不设置文档长度
+                il.Emit(OpCodes.Ldloc_1);
+                il.Emit(OpCodes.Ldc_I8, 0L);
+                il.Emit(OpCodes.Newobj, typeof(long?).GetConstructor(new[] { typeof(long) }));
+                il.Emit(OpCodes.Callvirt, typeof(IOwinResponse).GetProperty("ContentLength").GetSetMethod());
+            }
+            il.MarkLabel(alldone);
+            il.Emit(OpCodes.Ldsfld, typeof(HttpHelper).GetField("completeTask"));
+            il.Emit(OpCodes.Stloc_S, (byte)10);
+            il.MarkLabel(retlabel);
+            if (typeof(IDisposable).IsAssignableFrom(type1))
+            {
+                il.BeginFinallyBlock();
+                il.Emit(OpCodes.Ldloc_S, (byte)5);
+                il.Emit(OpCodes.Callvirt, typeof(IDisposable).GetMethod("Dispose"));
+                il.EndExceptionBlock();
+            }
+            il.Emit(OpCodes.Ldloc_S, (byte)10);
+            il.Emit(OpCodes.Ret);//[Task]            
+            return (Func<IOwinContext, string[], Task>)dm.CreateDelegate(typeof(Func<IOwinContext, string[], Task>));
         }
 
         static Dictionary<Type, MethodInfo> methods = new Dictionary<Type, MethodInfo>();
@@ -648,11 +1043,11 @@ namespace OwinLight
         {
             if (query == null) return;
             Type type = typeof(T);
-            CacheInfo cache;
+            QCacheInfo cache;
             if (!TryGetQueryCache(type, out cache))
             {
-                cache = new CacheInfo();
-                cache.Deserializer = GetTypeDeserializer(type, query);
+                cache = new QCacheInfo();
+                cache.Deserializer = GetTypeDeserializer(type);
                 SetQueryCache(type, cache);
             }
             cache.Deserializer(obj, query);

@@ -10,13 +10,13 @@ namespace OwinLight
     //     Used to decorate Request DTO's to associate a RESTful request path mapping
     //     with a service. Multiple attributes can be applied to each request DTO, to
     //     map multiple paths to the service.
-    [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = true, Inherited = false)]
-    public class RouteAttribute : Attribute
+    [AttributeUsage(AttributeTargets.Class, AllowMultiple = true, Inherited = false)]
+    public class RewriteAttribute : Attribute
     {
         /// <summary>
         /// 添加HTTP响应路径
         /// </summary>
-        public RouteAttribute(string path)
+        public RewriteAttribute(string path)
         {
             if (path == null || !path.StartsWith("/")) throw new Exception("路径有误");
             Path = path;
@@ -28,7 +28,7 @@ namespace OwinLight
         /// </summary>
         /// <param name="path">路径</param>
         /// <param name="verbs">http版本，如："GET","POST"</param>
-        public RouteAttribute(string path, string verbs)
+        public RewriteAttribute(string path, string verbs)
         {
             if (path == null || !path.StartsWith("/")) throw new Exception("路径有误");
             Path = path;
@@ -36,14 +36,14 @@ namespace OwinLight
             MaxLength = 4 * 1024 * 1024;//默认限制4M请求字节数
         }
 
-        public RouteAttribute(string path, int maxlength)
+        public RewriteAttribute(string path, int maxlength)
         {
             if (path == null || !path.StartsWith("/")) throw new Exception("路径有误");
             Path = path;
             MaxLength = maxlength;
         }
 
-        public RouteAttribute(string path, string verbs, int maxlength)
+        public RewriteAttribute(string path, string verbs, int maxlength)
         {
             if (path == null || !path.StartsWith("/")) throw new Exception("路径有误");
             Path = path;

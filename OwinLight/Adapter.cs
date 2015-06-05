@@ -12,6 +12,7 @@ using Microsoft.Owin;
 using Microsoft.Owin.Builder;
 using Owin;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -27,16 +28,15 @@ namespace OwinLight
         Func<IDictionary<string, object>, Task> _owinApp;//owin容器
         public static readonly Dictionary<string, Func<IOwinContext, Task>> _all_route = new Dictionary<string, Func<IOwinContext, Task>>();//path处理容器，处理任意版本标准路径
         public static readonly Dictionary<string, Dictionary<string, Func<IOwinContext, Task>>> _verb_route;//path处理容器，处理带版本的标准路径
-        static readonly List<Tuple<Regex, Func<IOwinContext, Match, Task>>> _routeRegex = new List<Tuple<Regex, Func<IOwinContext, Match, Task>>>();//path正则处理容器，处理伪静态路径,慎用，影响性能的。
+        static readonly RewritePathNode[] _rewrite_route;
+        static int maxdepth = 10;//伪静态最大深度，深度是指有/分割的子串数量
 
         static Adapter()
         {
-            _verb_route = new Dictionary<string, Dictionary<string, Func<IOwinContext, Task>>>(5);
+            _verb_route = new Dictionary<string, Dictionary<string, Func<IOwinContext, Task>>>(2);
             _verb_route.Add("GET", new Dictionary<string, Func<IOwinContext, Task>>());
             _verb_route.Add("POST", new Dictionary<string, Func<IOwinContext, Task>>());
-            //_verb_route.Add("PUT", new Dictionary<string, Func<IOwinContext, Task>>());
-            //_verb_route.Add("DELETE", new Dictionary<string, Func<IOwinContext, Task>>());
-            //_verb_route.Add("HEAD", new Dictionary<string, Func<IOwinContext, Task>>());
+            _rewrite_route = new RewritePathNode[maxdepth];
         }
         /// <summary>
         /// 适配器构造函数
@@ -54,9 +54,9 @@ namespace OwinLight
                 var files = ds.GetFiles("*.dll", SearchOption.AllDirectories);
                 if (files != null)
                 {
+                    Assembly assembly = null;
                     foreach (var f in files)
                     {
-                        Assembly assembly = null;
                         try
                         {
                             assembly = AppDomain.CurrentDomain.Load(AssemblyName.GetAssemblyName(f.FullName));
@@ -77,7 +77,6 @@ namespace OwinLight
                                     try
                                     {
                                         BaseRoute ir = (BaseRoute)Activator.CreateInstance(type);
-                                        ir.AddRoute(_routeRegex);
                                     }
                                     catch (Exception e)
                                     {
@@ -91,14 +90,15 @@ namespace OwinLight
                                     {
                                         ParameterInfo[] param;
                                         Type paramtype;
-                                        IEnumerable<RouteAttribute> arrts;
+                                        IEnumerable<RouteAttribute> arrts1;
+                                        IEnumerable<RewriteAttribute> arrts2;
                                         Func<IOwinContext, Task> func;
                                         bool isdone = false;
-                                        arrts = m.GetCustomAttributes<RouteAttribute>(false);
+                                        arrts1 = m.GetCustomAttributes<RouteAttribute>(false);//处理函数直接注册的路由
                                         param = m.GetParameters();
                                         if (param.Length == 1)
                                         {
-                                            foreach (var routeattr in arrts)
+                                            foreach (var routeattr in arrts1)
                                             {
                                                 if (routeattr.Verbs == null)
                                                 {
@@ -140,14 +140,14 @@ namespace OwinLight
                                                     }
                                                 }
                                             }
-                                            if (!isdone)
+                                            if (!isdone)//处理参数类路由
                                             {
                                                 switch (m.Name)
                                                 {
                                                     case "Any":
                                                         paramtype = param[0].ParameterType;
-                                                        arrts = paramtype.GetCustomAttributes<RouteAttribute>(false);
-                                                        foreach (var routeattr in arrts)
+                                                        arrts1 = paramtype.GetCustomAttributes<RouteAttribute>(false);
+                                                        foreach (var routeattr in arrts1)
                                                         {
                                                             if (!_all_route.ContainsKey(routeattr.Path))
                                                             {
@@ -162,8 +162,8 @@ namespace OwinLight
                                                         break;
                                                     case "Get":
                                                         paramtype = param[0].ParameterType;
-                                                        arrts = paramtype.GetCustomAttributes<RouteAttribute>(false);
-                                                        foreach (var routeattr in arrts)
+                                                        arrts1 = paramtype.GetCustomAttributes<RouteAttribute>(false);
+                                                        foreach (var routeattr in arrts1)
                                                         {
                                                             var get_route = _verb_route["GET"];
                                                             if (!get_route.ContainsKey(routeattr.Path))
@@ -179,8 +179,8 @@ namespace OwinLight
                                                         break;
                                                     case "Post":
                                                         paramtype = param[0].ParameterType;
-                                                        arrts = paramtype.GetCustomAttributes<RouteAttribute>(false);
-                                                        foreach (var routeattr in arrts)
+                                                        arrts1 = paramtype.GetCustomAttributes<RouteAttribute>(false);
+                                                        foreach (var routeattr in arrts1)
                                                         {
                                                             var post_route = _verb_route["POST"];
                                                             if (!post_route.ContainsKey(routeattr.Path))
@@ -196,6 +196,56 @@ namespace OwinLight
                                                         break;
                                                     default:
                                                         break;
+                                                }
+                                            }
+                                            //处理伪静态路径（只判断POCO的参数类）
+                                            if (m.Name == "Rewrite")
+                                            {
+                                                paramtype = param[0].ParameterType;
+                                                arrts2 = paramtype.GetCustomAttributes<RewriteAttribute>(false);
+                                                foreach (var rewriteattr in arrts2)
+                                                {
+                                                    string[] subpaths = rewriteattr.Path.Split(new char[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
+                                                    int length = subpaths.Length;
+                                                    string pathnode;
+                                                    bool isgoing = true;
+                                                    RewritePathNode n1, n2;
+                                                    n1 = _rewrite_route[length - 1];
+                                                    if (n1 == null)
+                                                    {
+                                                        n1 = new RewritePathNode() { chindren = new Dictionary<string, RewritePathNode>() };
+                                                        _rewrite_route[length - 1] = n1;
+                                                    }
+                                                    List<Tuple<string, int>> keys = new List<Tuple<string, int>>();
+                                                    for (int i = 0; i < length; i++)
+                                                    {
+                                                        pathnode = subpaths[i];
+                                                        if (pathnode[0] == '{' && pathnode[pathnode.Length - 1] == '}')
+                                                        {
+                                                            isgoing = false;
+                                                            keys.Add(new Tuple<string, int>(pathnode.Substring(1, pathnode.Length - 2), i));
+                                                        }
+                                                        else
+                                                        {
+                                                            if (isgoing)
+                                                            {
+                                                                if (!n1.chindren.TryGetValue(pathnode, out n2))
+                                                                {
+                                                                    n2 = new RewritePathNode() { chindren = new Dictionary<string, RewritePathNode>() };
+                                                                    n1.chindren.Add(pathnode, n2);
+                                                                }
+                                                                n1 = n2;
+                                                            }
+                                                        }
+                                                    }
+                                                    if (n1.func == null)
+                                                    {
+                                                        n1.func = HttpHelper.GetOwinRewriteTask(type, paramtype, m.ReturnType, m, rewriteattr.MaxLength, keys);
+                                                    }
+                                                    else
+                                                    {
+                                                        Debug.Write(string.Format("Rewrite路径重复注册. path:{0};param:{1};func:{2}", rewriteattr.Path, paramtype.Name, m.Name));
+                                                    }
                                                 }
                                             }
                                         }
@@ -247,13 +297,30 @@ namespace OwinLight
                                 return d(c);
                             }
                         }
-                        //最后进行正则匹配，处理伪静态路径，此功能尚未优化处理，不建议多使用。
-                        foreach (var item in _routeRegex)
+                        //最后处理伪静态路径，maxdpth大于1时才处理，要关闭伪静态处理，可以设置maxdepth为0。
+                        if (maxdepth > 0)
                         {
-                            var match = item.Item1.Match(path);
-                            if (match.Success)
+                            RewritePathNode n1, n2;
+                            string[] subpaths = path.Split(new char[] { '/' }, maxdepth + 1, StringSplitOptions.RemoveEmptyEntries);
+                            int length = subpaths.Length;
+                            if (length > 0 && length <= maxdepth)
                             {
-                                return item.Item2(c, match);
+                                n1 = _rewrite_route[length - 1];
+                                if (n1 != null)
+                                {
+                                    for (int i = 0; i < length - 1; i++)
+                                    {
+                                        if (n1.chindren.TryGetValue(subpaths[i], out n2))
+                                        {
+                                            n1 = n2;
+                                        }
+                                        else
+                                        {
+                                            break;
+                                        }
+                                    }
+                                    if (n1.func != null) return n1.func(c, subpaths);
+                                }
                             }
                         }
                     }
