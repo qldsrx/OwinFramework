@@ -31,6 +31,8 @@ namespace OwinLight
         static readonly RewritePathNode[] _rewrite_route;
         static int maxdepth = 10;//伪静态最大深度，深度是指有/分割的子串数量
 
+        public static Func<IOwinContext, Task> NotFountFun; //处理路由未匹配的场景。
+
         static Adapter()
         {
             _verb_route = new Dictionary<string, Dictionary<string, Func<IOwinContext, Task>>>(2);
@@ -332,6 +334,7 @@ namespace OwinLight
                         return HttpHelper.completeTask;
                     }
                 }
+                if (NotFountFun != null) return NotFountFun(c);//添加默认处理函数，可以后期注册404响应之类的页面。
                 //如果上面未处理，GET返回404,POST取消响应
                 if (request.Method == "GET")
                 {
@@ -345,5 +348,7 @@ namespace OwinLight
                 }
             });
         }
+
+        
     }
 }

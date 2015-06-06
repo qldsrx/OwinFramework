@@ -66,10 +66,44 @@ namespace OwinLight.Test
             return x.Task;
         }
 
+        /// <summary>
+        /// 静态页提供示例，未做任何缓存和304响应处理，仅演示用。
+        /// </summary>
+        public Task GetStaticFile(IOwinContext context)
+        {
+            if (context.Request.Method == "GET" && context.Request.Path.HasValue)
+            {                
+                string path = HttpHelper.GetMapPath(context.Request.Path.Value);
+                FileInfo fi = new FileInfo(path);
+                var response = context.Response;
+                if (fi.Exists)
+                {
+                    response.ContentType = MimeTypes.GetMimeType(fi.Extension);
+                    response.ContentLength = fi.Length;
+                    response.StatusCode = 200;
+                    using (FileStream fs = fi.OpenRead())
+                    {
+                        fs.CopyTo(response.Body);
+                    }
+                }
+                else
+                {
+                    response.StatusCode = 404;
+                    response.Write("<h1 style='color:red'>很抱歉，出现了404错误。</h1>");
+                }
+                return HttpHelper.completeTask;
+            }
+            else
+            {
+                return HttpHelper.cancelTask;
+            }
+        }
         public Demo1()
         {
             //定义静态路径处理函数，Any表示任意请求类型，Get表示只对GET请求处理，Post表示只对POST请求处理
             Any["/"] = GetRoot;
+            //添加默认路由处理函数，该构造函数只会在网站启动时运行一次，因此此处添加不会有问题。
+            Adapter.NotFountFun = GetStaticFile;
         }
     }
 
