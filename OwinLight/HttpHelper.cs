@@ -259,6 +259,8 @@ namespace OwinLight
             var label5 = il.DefineLabel();
             var label6 = il.DefineLabel();
             var label7 = il.DefineLabel();
+            var label8 = il.DefineLabel();
+            var label9 = il.DefineLabel();
             il.DeclareLocal(typeof(IOwinRequest));//0
             il.DeclareLocal(typeof(IOwinResponse));//1
             il.DeclareLocal(typeof(string));//2
@@ -270,6 +272,8 @@ namespace OwinLight
             il.DeclareLocal(typeof(List<HttpFile>));//8
             il.DeclareLocal(typeof(Stream));//9
             il.DeclareLocal(typeof(Task));//10
+            il.DeclareLocal(typeof(String));//11
+            il.DeclareLocal(typeof(int));//12
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Dup);
             il.Emit(OpCodes.Callvirt, typeof(IOwinContext).GetProperty("Request").GetGetMethod());
@@ -328,16 +332,34 @@ namespace OwinLight
             il.Emit(OpCodes.Ldloc_3);
             il.Emit(OpCodes.Ldc_I4, maxlength);
             il.Emit(OpCodes.Cgt);
-            il.Emit(OpCodes.Brtrue, label1);//stack is empty,超过限制后不处理请求
-            il.Emit(OpCodes.Ldloc_S, (byte)9);
+            il.Emit(OpCodes.Brtrue, label1);//stack is empty,超过限制后不处理请求            
             il.Emit(OpCodes.Ldloc_3);
             il.Emit(OpCodes.Newarr, typeof(byte));
-            il.Emit(OpCodes.Dup);
-            il.Emit(OpCodes.Stloc_S, (byte)4);
-            il.Emit(OpCodes.Ldc_I4_0);
+            il.Emit(OpCodes.Stloc_S, (byte)4);//stack is empty
+
+            il.MarkLabel(label9); // loop flag
+            il.Emit(OpCodes.Ldloc_S, (byte)9);
+            il.Emit(OpCodes.Ldloc_S, (byte)4);
+            il.Emit(OpCodes.Ldloc_S, (byte)12);//初始为0，以后为offset
             il.Emit(OpCodes.Ldloc_3);
+            il.Emit(OpCodes.Ldloc_S, (byte)12);
+            il.Emit(OpCodes.Sub);
             il.Emit(OpCodes.Callvirt, typeof(Stream).GetMethod("Read", new[] { typeof(byte[]), typeof(int), typeof(int) }));
+            il.Emit(OpCodes.Dup);
+            il.Emit(OpCodes.Brfalse, label8);// stack is empty
+            il.Emit(OpCodes.Ldloc_S, (byte)12);
+            il.Emit(OpCodes.Add);
+            il.Emit(OpCodes.Dup);
+            il.Emit(OpCodes.Stloc_S, (byte)12);//[int]
             il.Emit(OpCodes.Ldloc_3);
+            il.Emit(OpCodes.Clt);
+            il.Emit(OpCodes.Brtrue_S, label9); // loop start
+
+            il.Emit(OpCodes.Ldloc_3); //No meaning,only fit the stack
+            il.MarkLabel(label8);//[int]
+            il.Emit(OpCodes.Pop);// stack is empty
+            il.Emit(OpCodes.Ldloc_3);
+            il.Emit(OpCodes.Ldloc_S, (byte)12);
             il.Emit(OpCodes.Ceq);
             il.Emit(OpCodes.Brfalse, label1);// stack is empty
             if (type2 == typeof(string))
@@ -454,6 +476,7 @@ namespace OwinLight
                 var label10 = il.DefineLabel();
                 var headsend1 = il.DefineLabel();
                 var headsend2 = il.DefineLabel();
+                var nocallback = il.DefineLabel();
                 il.Emit(OpCodes.Dup);//[object][object]
                 il.Emit(OpCodes.Ldnull);
                 il.Emit(OpCodes.Ceq);
@@ -463,7 +486,7 @@ namespace OwinLight
                 il.Emit(OpCodes.Brtrue_S, stringLabel);//[object]
                 il.Emit(OpCodes.Dup);
                 il.Emit(OpCodes.Isinst, typeof(Stream));//[object][Stream or null]
-                il.Emit(OpCodes.Brtrue_S, streamLabel);//[object]
+                il.Emit(OpCodes.Brtrue, streamLabel);//[object]
                 il.Emit(OpCodes.Call, typeof(ServiceStack.Text.StringExtensions).GetMethod("ToJson").MakeGenericMethod(type3));
 
                 il.Emit(OpCodes.Ldloc_1);
@@ -484,6 +507,20 @@ namespace OwinLight
                 il.MarkLabel(label10);
                 il.Emit(OpCodes.Castclass, typeof(string));
                 il.Emit(OpCodes.Stloc_2);
+                il.Emit(OpCodes.Ldloc_0);//[IOwinRequest],添加jsonp处理
+                il.Emit(OpCodes.Callvirt, typeof(IOwinRequest).GetProperty("Query").GetGetMethod());
+                il.Emit(OpCodes.Ldstr, "callback");
+                il.Emit(OpCodes.Callvirt, typeof(IReadableStringCollection).GetMethod("Get"));
+                il.Emit(OpCodes.Dup);
+                il.Emit(OpCodes.Stloc_S, (byte)11);
+                il.Emit(OpCodes.Brfalse_S, nocallback);//stack is empty
+                il.Emit(OpCodes.Ldloc_S, (byte)11);
+                il.Emit(OpCodes.Ldstr, "(");
+                il.Emit(OpCodes.Ldloc_2);
+                il.Emit(OpCodes.Ldstr, ")");
+                il.Emit(OpCodes.Call, typeof(string).GetMethod("Concat", new[] { typeof(string), typeof(string), typeof(string), typeof(string) }));
+                il.Emit(OpCodes.Stloc_2);
+                il.MarkLabel(nocallback);
                 il.Emit(OpCodes.Ldloc_1);//[IOwinResponse]
                 il.Emit(OpCodes.Call, typeof(Encoding).GetProperty("UTF8").GetGetMethod());
                 il.Emit(OpCodes.Ldloc_2);
@@ -584,6 +621,8 @@ namespace OwinLight
             var label5 = il.DefineLabel();
             var label6 = il.DefineLabel();
             var label7 = il.DefineLabel();
+            var label8 = il.DefineLabel();
+            var label9 = il.DefineLabel();
             il.DeclareLocal(typeof(IOwinRequest));//0
             il.DeclareLocal(typeof(IOwinResponse));//1
             il.DeclareLocal(typeof(string));//2
@@ -595,6 +634,8 @@ namespace OwinLight
             il.DeclareLocal(typeof(List<HttpFile>));//8
             il.DeclareLocal(typeof(Stream));//9
             il.DeclareLocal(typeof(Task));//10
+            il.DeclareLocal(typeof(string));//11
+            il.DeclareLocal(typeof(int));//12
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Dup);
             il.Emit(OpCodes.Callvirt, typeof(IOwinContext).GetProperty("Request").GetGetMethod());
@@ -647,16 +688,34 @@ namespace OwinLight
             il.Emit(OpCodes.Ldloc_3);
             il.Emit(OpCodes.Ldc_I4, maxlength);
             il.Emit(OpCodes.Cgt);
-            il.Emit(OpCodes.Brtrue, label1);//stack is empty,超过限制后不处理请求
-            il.Emit(OpCodes.Ldloc_S, (byte)9);
+            il.Emit(OpCodes.Brtrue, label1);//stack is empty,超过限制后不处理请求            
             il.Emit(OpCodes.Ldloc_3);
             il.Emit(OpCodes.Newarr, typeof(byte));
-            il.Emit(OpCodes.Dup);
-            il.Emit(OpCodes.Stloc_S, (byte)4);
-            il.Emit(OpCodes.Ldc_I4_0);
+            il.Emit(OpCodes.Stloc_S, (byte)4);//stack is empty
+
+            il.MarkLabel(label9); // loop flag
+            il.Emit(OpCodes.Ldloc_S, (byte)9);
+            il.Emit(OpCodes.Ldloc_S, (byte)4);
+            il.Emit(OpCodes.Ldloc_S, (byte)12);//初始为0，以后为offset
             il.Emit(OpCodes.Ldloc_3);
+            il.Emit(OpCodes.Ldloc_S, (byte)12);
+            il.Emit(OpCodes.Sub);
             il.Emit(OpCodes.Callvirt, typeof(Stream).GetMethod("Read", new[] { typeof(byte[]), typeof(int), typeof(int) }));
+            il.Emit(OpCodes.Dup);
+            il.Emit(OpCodes.Brfalse, label8);// stack is empty
+            il.Emit(OpCodes.Ldloc_S, (byte)12);
+            il.Emit(OpCodes.Add);
+            il.Emit(OpCodes.Dup);
+            il.Emit(OpCodes.Stloc_S, (byte)12);//[int]
             il.Emit(OpCodes.Ldloc_3);
+            il.Emit(OpCodes.Clt);
+            il.Emit(OpCodes.Brtrue_S, label9); // loop start
+
+            il.Emit(OpCodes.Ldloc_3); //No meaning,only fit the stack
+            il.MarkLabel(label8);//[int]
+            il.Emit(OpCodes.Pop);// stack is empty
+            il.Emit(OpCodes.Ldloc_3);
+            il.Emit(OpCodes.Ldloc_S, (byte)12);
             il.Emit(OpCodes.Ceq);
             il.Emit(OpCodes.Brfalse, label1);// stack is empty
             il.BeginExceptionBlock();
@@ -753,7 +812,7 @@ namespace OwinLight
             il.MarkLabel(label5);// stack is empty
             il.Emit(OpCodes.Ldloc_S, (byte)5);
             il.Emit(OpCodes.Ldloc_S, (byte)6);
-            il.Emit(OpCodes.Callvirt, method);            
+            il.Emit(OpCodes.Callvirt, method);
             if (type3 != typeof(void))
             {
                 var nullLabel = il.DefineLabel();
@@ -762,6 +821,7 @@ namespace OwinLight
                 var label10 = il.DefineLabel();
                 var headsend1 = il.DefineLabel();
                 var headsend2 = il.DefineLabel();
+                var nocallback = il.DefineLabel();
                 il.Emit(OpCodes.Dup);//[object][object]
                 il.Emit(OpCodes.Ldnull);
                 il.Emit(OpCodes.Ceq);
@@ -771,9 +831,8 @@ namespace OwinLight
                 il.Emit(OpCodes.Brtrue_S, stringLabel);//[object]
                 il.Emit(OpCodes.Dup);
                 il.Emit(OpCodes.Isinst, typeof(Stream));//[object][Stream or null]
-                il.Emit(OpCodes.Brtrue_S, streamLabel);//[object]
+                il.Emit(OpCodes.Brtrue, streamLabel);//[object]
                 il.Emit(OpCodes.Call, typeof(ServiceStack.Text.StringExtensions).GetMethod("ToJson").MakeGenericMethod(type3));
-
                 il.Emit(OpCodes.Ldloc_1);
                 il.Emit(OpCodes.Callvirt, typeof(IOwinResponse).GetProperty("ContentType").GetGetMethod());
                 il.Emit(OpCodes.Brtrue_S, label10);
@@ -792,6 +851,20 @@ namespace OwinLight
                 il.MarkLabel(label10);
                 il.Emit(OpCodes.Castclass, typeof(string));
                 il.Emit(OpCodes.Stloc_2);
+                il.Emit(OpCodes.Ldloc_0);//[IOwinRequest],添加jsonp处理
+                il.Emit(OpCodes.Callvirt, typeof(IOwinRequest).GetProperty("Query").GetGetMethod());
+                il.Emit(OpCodes.Ldstr, "callback");
+                il.Emit(OpCodes.Callvirt, typeof(IReadableStringCollection).GetMethod("Get"));
+                il.Emit(OpCodes.Dup);
+                il.Emit(OpCodes.Stloc_S, (byte)11);
+                il.Emit(OpCodes.Brfalse_S, nocallback);//stack is empty
+                il.Emit(OpCodes.Ldloc_S, (byte)11);
+                il.Emit(OpCodes.Ldstr, "(");
+                il.Emit(OpCodes.Ldloc_2);
+                il.Emit(OpCodes.Ldstr, ")");
+                il.Emit(OpCodes.Call, typeof(string).GetMethod("Concat", new[] { typeof(string), typeof(string), typeof(string), typeof(string) }));
+                il.Emit(OpCodes.Stloc_2);
+                il.MarkLabel(nocallback);
                 il.Emit(OpCodes.Ldloc_1);//[IOwinResponse]
                 il.Emit(OpCodes.Call, typeof(Encoding).GetProperty("UTF8").GetGetMethod());
                 il.Emit(OpCodes.Ldloc_2);
@@ -853,7 +926,7 @@ namespace OwinLight
             }
             else
             {
-                il.Emit(OpCodes.Ldloc_S,(byte)5);
+                il.Emit(OpCodes.Ldloc_S, (byte)5);
                 il.Emit(OpCodes.Callvirt, typeof(IService).GetProperty("IsHeadersSended").GetGetMethod());
                 il.Emit(OpCodes.Brtrue_S, alldone);//已经发送过http头的话，就不设置文档长度
                 il.Emit(OpCodes.Ldloc_1);
