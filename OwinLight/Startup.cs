@@ -4,7 +4,7 @@
  * 2、将编译得到的dll连同Owin.dll、Microsoft.Owin.dll等文件
  *    一同放置到网站的bin文件夹中
  * 3、在对应网站的jws网站配置文件中加入一句，声明要使用的适配器：
- *    OwinMain=OwinLight.dll,OwinLight.Adapter
+ *    OwinMain=OwinLight.dll,OwinLight.Startup
  * 4、重启Jexus让配置生效。
  *************************************************************************/
 
@@ -23,7 +23,7 @@ using System.Threading.Tasks;
 
 namespace OwinLight
 {
-    public class Adapter
+    public class Startup
     {
         Func<IDictionary<string, object>, Task> _owinApp;//owin容器
         public static readonly Dictionary<string, Func<IOwinContext, Task>> _all_route = new Dictionary<string, Func<IOwinContext, Task>>();//path处理容器，处理任意版本标准路径
@@ -33,7 +33,7 @@ namespace OwinLight
 
         public static Func<IOwinContext, Task> NotFountFun; //处理路由未匹配的场景。
 
-        static Adapter()
+        static Startup()
         {
             _verb_route = new Dictionary<string, Dictionary<string, Func<IOwinContext, Task>>>(2);
             _verb_route.Add("GET", new Dictionary<string, Func<IOwinContext, Task>>());
@@ -43,7 +43,7 @@ namespace OwinLight
         /// <summary>
         /// 适配器构造函数
         /// </summary>
-        public Adapter()
+        public Startup()
         {
             var bin = AppDomain.CurrentDomain.SetupInformation.PrivateBinPath;
             if (string.IsNullOrEmpty(bin))

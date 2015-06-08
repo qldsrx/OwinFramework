@@ -12,7 +12,7 @@ namespace owinhost
         static void Main(string[] args)
         {
             var url = "http://+:8080";
-            using (WebApp.Start<OwinLight.Adapter>(url))// WIN7以上需要管理员权限运行
+            using (WebApp.Start<OwinLight.Startup>(url))// WIN7以上需要管理员权限运行
             {
                 Console.WriteLine("Running on {0}", url);
                 Console.WriteLine("Press enter to exit");

@@ -103,7 +103,7 @@ namespace OwinLight.Test
             //定义静态路径处理函数，Any表示任意请求类型，Get表示只对GET请求处理，Post表示只对POST请求处理
             Any["/"] = GetRoot;
             //添加默认路由处理函数，该构造函数只会在网站启动时运行一次，因此此处添加不会有问题。
-            Adapter.NotFountFun = GetStaticFile;
+            Startup.NotFountFun = GetStaticFile;
         }
     }
 

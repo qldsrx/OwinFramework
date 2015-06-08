@@ -55,7 +55,7 @@
     <Compile Include="HttpHeaders.cs" />
     <Compile Include="HttpHelper.cs" />
     <Compile Include="BaseRoute.cs" />
-    <Compile Include="Adapter.cs" />
+    <Compile Include="Startup.cs" />
     <Compile Include="HttpMultipart.cs" />
     <Compile Include="HttpMultipartBoundary.cs" />
     <Compile Include="HttpMultipartBuffer.cs" />
