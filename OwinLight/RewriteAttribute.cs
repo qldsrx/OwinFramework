@@ -70,5 +70,10 @@ namespace OwinLight
         /// 最大POST数据长度，超出时自动忽略POST数据。
         /// </summary>
         public int MaxLength { get; set; }
+
+        /// <summary>
+        /// 自定义响应头，key-value用冒号隔开，多个头用封号隔开
+        /// </summary>
+        public string Headers { get; set; }
     }
 }

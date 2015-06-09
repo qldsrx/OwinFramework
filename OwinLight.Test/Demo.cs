@@ -60,7 +60,7 @@ namespace OwinLight.Test
         {
             var x = new TaskCompletionSource<object>();
             x.SetResult(null); //调用SetResult后，这个服务即转为完成状态
-            //context.Response.ContentType = "text/html; charset=utf-8";
+            context.Response.ContentType = "text/html; charset=utf-8";
             HttpHelper.WritePart(context, "<h1 style='color:red'>您好，Jexus是全球首款直接支持MS OWIN标准的WEB服务器！</h1>");
             context.WritePart(context.Request.Cookies["api"] ?? "null");
             return x.Task;
@@ -130,10 +130,11 @@ namespace OwinLight.Test
             return sr.ReadToEnd();
         }
 
-        public void Rewrite(FileGet request)
+        public string Rewrite(FileGet request)
         {
             Response.ContentType = "text/html; charset=utf-8";
-            Response.Write(string.Format("<h1 style='color:red'>fileid:{0}<br/>filename:{1}</h1>", request.fileid, request.filename));
+            //Response.Write(string.Format("<h1 style='color:red'>fileid:{0}<br/>filename:{1}</h1>", request.fileid, request.filename));
+            return string.Format("<h1 style='color:red'>fileid:{0}<br/>filename:{1}</h1>", request.fileid, request.filename);
         }
 
         /// <summary>
@@ -141,7 +142,7 @@ namespace OwinLight.Test
         /// </summary>
         /// <param name="request">参数为string时，传入的是POST的字符串数据，UTF8解码</param>
         /// <returns>返回值自动识别类型，也可以强类型，强类型便于自动产生接口文档（下个版本支持）</returns>
-        [Route("/api/test1", 1024)]
+        [Route("/api/test1")]
         public object testString(String request)
         {
             return request;

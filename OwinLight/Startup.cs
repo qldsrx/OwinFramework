@@ -14,6 +14,7 @@ using Owin;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Configuration;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -29,7 +30,8 @@ namespace OwinLight
         public static readonly Dictionary<string, Func<IOwinContext, Task>> _all_route = new Dictionary<string, Func<IOwinContext, Task>>();//path处理容器，处理任意版本标准路径
         public static readonly Dictionary<string, Dictionary<string, Func<IOwinContext, Task>>> _verb_route;//path处理容器，处理带版本的标准路径
         static readonly RewritePathNode[] _rewrite_route;
-        static int maxdepth = 10;//伪静态最大深度，深度是指有/分割的子串数量
+        static int rewritedepth = 10;//伪静态最大深度，深度是指有/分割的子串数量
+        static string responseheaders;//自定义响应头，key-value用冒号隔开，多个头用封号隔开
 
         public static Func<IOwinContext, Task> NotFountFun; //处理路由未匹配的场景。
 
@@ -38,7 +40,17 @@ namespace OwinLight
             _verb_route = new Dictionary<string, Dictionary<string, Func<IOwinContext, Task>>>(2);
             _verb_route.Add("GET", new Dictionary<string, Func<IOwinContext, Task>>());
             _verb_route.Add("POST", new Dictionary<string, Func<IOwinContext, Task>>());
-            _rewrite_route = new RewritePathNode[maxdepth];
+            _rewrite_route = new RewritePathNode[rewritedepth];
+
+            if (ConfigurationManager.AppSettings.AllKeys.Contains("rewritedepth"))
+            {
+                int.TryParse(ConfigurationManager.AppSettings["rewritedepth"], out rewritedepth);
+            }
+
+            if (ConfigurationManager.AppSettings.AllKeys.Contains("responseheaders"))
+            {
+                responseheaders = ConfigurationManager.AppSettings["responseheaders"];
+            }
         }
         /// <summary>
         /// 适配器构造函数
@@ -96,6 +108,7 @@ namespace OwinLight
                                         IEnumerable<RewriteAttribute> arrts2;
                                         Func<IOwinContext, Task> func;
                                         bool isdone = false;
+                                        string headers = responseheaders;
                                         arrts1 = m.GetCustomAttributes<RouteAttribute>(false);//处理函数直接注册的路由
                                         param = m.GetParameters();
                                         if (param.Length == 1)
@@ -106,7 +119,8 @@ namespace OwinLight
                                                 {
                                                     if (!_all_route.ContainsKey(routeattr.Path))
                                                     {
-                                                        func = HttpHelper.GetOwinTask(type, param[0].ParameterType, m.ReturnType, m, routeattr.MaxLength);
+                                                        if (routeattr.Headers != null) headers = routeattr.Headers;
+                                                        func = HttpHelper.GetOwinTask(type, param[0].ParameterType, m.ReturnType, m, routeattr.MaxLength, headers);
                                                         _all_route.Add(routeattr.Path, func);
                                                         isdone = true;
                                                     }
@@ -120,7 +134,8 @@ namespace OwinLight
                                                     var get_route = _verb_route["GET"];
                                                     if (!get_route.ContainsKey(routeattr.Path))
                                                     {
-                                                        func = HttpHelper.GetOwinTask(type, param[0].ParameterType, m.ReturnType, m, routeattr.MaxLength);
+                                                        if (routeattr.Headers != null) headers = routeattr.Headers;
+                                                        func = HttpHelper.GetOwinTask(type, param[0].ParameterType, m.ReturnType, m, routeattr.MaxLength, headers);
                                                         get_route.Add(routeattr.Path, func);
                                                     }
                                                     else
@@ -133,7 +148,8 @@ namespace OwinLight
                                                     var post_route = _verb_route["POST"];
                                                     if (!post_route.ContainsKey(routeattr.Path))
                                                     {
-                                                        func = HttpHelper.GetOwinTask(type, param[0].ParameterType, m.ReturnType, m, routeattr.MaxLength);
+                                                        if (routeattr.Headers != null) headers = routeattr.Headers;
+                                                        func = HttpHelper.GetOwinTask(type, param[0].ParameterType, m.ReturnType, m, routeattr.MaxLength, headers);
                                                         post_route.Add(routeattr.Path, func);
                                                     }
                                                     else
@@ -153,7 +169,8 @@ namespace OwinLight
                                                         {
                                                             if (!_all_route.ContainsKey(routeattr.Path))
                                                             {
-                                                                func = HttpHelper.GetOwinTask(type, paramtype, m.ReturnType, m, routeattr.MaxLength);
+                                                                if (routeattr.Headers != null) headers = routeattr.Headers;
+                                                                func = HttpHelper.GetOwinTask(type, paramtype, m.ReturnType, m, routeattr.MaxLength, headers);
                                                                 _all_route.Add(routeattr.Path, func);
                                                             }
                                                             else
@@ -170,7 +187,8 @@ namespace OwinLight
                                                             var get_route = _verb_route["GET"];
                                                             if (!get_route.ContainsKey(routeattr.Path))
                                                             {
-                                                                func = HttpHelper.GetOwinTask(type, paramtype, m.ReturnType, m, routeattr.MaxLength);
+                                                                if (routeattr.Headers != null) headers = routeattr.Headers;
+                                                                func = HttpHelper.GetOwinTask(type, paramtype, m.ReturnType, m, routeattr.MaxLength, headers);
                                                                 get_route.Add(routeattr.Path, func);
                                                             }
                                                             else
@@ -187,7 +205,8 @@ namespace OwinLight
                                                             var post_route = _verb_route["POST"];
                                                             if (!post_route.ContainsKey(routeattr.Path))
                                                             {
-                                                                func = HttpHelper.GetOwinTask(type, paramtype, m.ReturnType, m, routeattr.MaxLength);
+                                                                if (routeattr.Headers != null) headers = routeattr.Headers;
+                                                                func = HttpHelper.GetOwinTask(type, paramtype, m.ReturnType, m, routeattr.MaxLength, headers);
                                                                 post_route.Add(routeattr.Path, func);
                                                             }
                                                             else
@@ -242,7 +261,8 @@ namespace OwinLight
                                                     }
                                                     if (n1.func == null)
                                                     {
-                                                        n1.func = HttpHelper.GetOwinRewriteTask(type, paramtype, m.ReturnType, m, rewriteattr.MaxLength, keys);
+                                                        if (rewriteattr.Headers != null) headers = rewriteattr.Headers;
+                                                        n1.func = HttpHelper.GetOwinRewriteTask(type, paramtype, m.ReturnType, m, rewriteattr.MaxLength, headers, keys);
                                                     }
                                                     else
                                                     {
@@ -300,12 +320,12 @@ namespace OwinLight
                             }
                         }
                         //最后处理伪静态路径，maxdpth大于1时才处理，要关闭伪静态处理，可以设置maxdepth为0。
-                        if (maxdepth > 0)
+                        if (rewritedepth > 0)
                         {
                             RewritePathNode n1, n2;
-                            string[] subpaths = path.Split(new char[] { '/' }, maxdepth + 1, StringSplitOptions.RemoveEmptyEntries);
+                            string[] subpaths = path.Split(new char[] { '/' }, rewritedepth + 1, StringSplitOptions.RemoveEmptyEntries);
                             int length = subpaths.Length;
-                            if (length > 0 && length <= maxdepth)
+                            if (length > 0 && length <= rewritedepth)
                             {
                                 n1 = _rewrite_route[length - 1];
                                 if (n1 != null)
@@ -349,6 +369,6 @@ namespace OwinLight
             });
         }
 
-        
+
     }
 }

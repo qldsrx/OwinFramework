@@ -16,61 +16,6 @@ namespace OwinLight
 {
     public static class HttpHelper
     {
-        /// <summary>
-        /// 缓存类型读取方法
-        /// </summary>
-        class QCacheInfo
-        {
-            public Action<object, IReadableStringCollection> Deserializer { get; set; }
-
-            public int hitCount;
-            public void RecordHit() { Interlocked.Increment(ref hitCount); }
-        }
-
-        static readonly ConcurrentDictionary<Type, QCacheInfo> _queryCache = new System.Collections.Concurrent.ConcurrentDictionary<Type, QCacheInfo>();
-
-        private static void SetQueryCache(Type key, QCacheInfo value)
-        {
-            if (Interlocked.Increment(ref collect) == COLLECT_PER_ITEMS)
-            {
-                CollectCacheGarbage();
-            }
-            _queryCache[key] = value;
-        }
-
-        private static void CollectCacheGarbage()
-        {
-            try
-            {
-                foreach (var pair in _queryCache)
-                {
-                    if (pair.Value.hitCount <= COLLECT_HIT_COUNT_MIN)
-                    {
-                        QCacheInfo cache;
-                        _queryCache.TryRemove(pair.Key, out cache);
-                    }
-                }
-            }
-            finally
-            {
-                Interlocked.Exchange(ref collect, 0);
-            }
-        }
-
-        private const int COLLECT_PER_ITEMS = 1000, COLLECT_HIT_COUNT_MIN = 0;
-        private static int collect;
-
-        private static bool TryGetQueryCache(Type key, out QCacheInfo value)
-        {
-            if (_queryCache.TryGetValue(key, out value))
-            {
-                value.RecordHit();
-                return true;
-            }
-            value = null;
-            return false;
-        }
-
         class PropInfo
         {
             public string Name { get; set; }
@@ -97,17 +42,13 @@ namespace OwinLight
                         .Where(p => p.GetIndexParameters().Any() && p.GetIndexParameters()[0].ParameterType == typeof(int))
                         .Select(p => p.GetGetMethod()).First();
 
-        static Action<object, IReadableStringCollection> GetTypeDeserializer(Type type)
+        static DynamicMethod GetTypeDeserializer(Type type)
         {
-            var dm = new DynamicMethod(string.Format("Deserialize{0}", Guid.NewGuid()), null, new[] { typeof(object), typeof(IReadableStringCollection) }, true);
+            var dm = new DynamicMethod(string.Format("Deserialize{0}", Guid.NewGuid()), null, new[] { type, typeof(IReadableStringCollection) }, true);
             var properties = GetSettableProps(type);
             var il = dm.GetILGenerator();
             il.DeclareLocal(typeof(IList<string>)); //0
             il.DeclareLocal(typeof(string)); //1
-            il.DeclareLocal(type);//2
-            il.Emit(OpCodes.Ldarg_0);// [object]
-            il.Emit(OpCodes.Isinst, type);// [target]
-            il.Emit(OpCodes.Stloc_2);
             foreach (var item in properties)
             {
                 var key = item.Name;
@@ -132,14 +73,16 @@ namespace OwinLight
                     il.Emit(OpCodes.Callvirt, getValues);// [IList<string>]
                     il.Emit(OpCodes.Dup);// [IList<string>][IList<string>]
                     il.Emit(OpCodes.Stloc_0);// [IList<string>]
-                    il.Emit(OpCodes.Brfalse_S, label1);// stack is empty
-                    il.Emit(OpCodes.Ldloc_0);// [IList<string>]
+                    il.Emit(OpCodes.Brfalse_S, label1);// stack is empty                    
                     if (unboxType.IsArray)
                     {
-                        il.Emit(OpCodes.Call, getMethod);// ([unbox-value]/[enum-object])
+                        il.Emit(OpCodes.Ldarg_0);// [target]
+                        il.Emit(OpCodes.Ldloc_0);// [target][IList<string>]
+                        il.Emit(OpCodes.Call, getMethod);// [target]([unbox-value]/[enum-object])
                     }
                     else
                     {
+                        il.Emit(OpCodes.Ldloc_0);// [IList<string>]
                         il.Emit(OpCodes.Ldc_I4_0);
                         il.Emit(OpCodes.Callvirt, getItem);// [string]
                         il.Emit(OpCodes.Dup);
@@ -148,7 +91,7 @@ namespace OwinLight
                         il.Emit(OpCodes.Ldloc_1);
                         il.Emit(OpCodes.Callvirt, typeof(string).GetProperty("Length").GetGetMethod());
                         il.Emit(OpCodes.Brfalse_S, label1);// stack is empty
-                        il.Emit(OpCodes.Ldloc_2);// [target]
+                        il.Emit(OpCodes.Ldarg_0);// [target]
                         il.Emit(OpCodes.Ldloc_1);// [target][string]
                         if (unboxType.IsEnum)
                         {
@@ -171,13 +114,12 @@ namespace OwinLight
                 }
             }
             il.Emit(OpCodes.Ret);
-            return (Action<object, IReadableStringCollection>)dm.CreateDelegate(typeof(Action<object, IReadableStringCollection>));
+            return dm;
         }
 
-        //static Action<object, string[]> GetTypeDeserializerFromArray(Type type, List<Tuple<string, int>> keys)
         static DynamicMethod GetTypeDeserializerFromArray(Type type, List<Tuple<string, int>> keys)
         {
-            var dm = new DynamicMethod(string.Format("Deserialize{0}", Guid.NewGuid()), null, new[] { typeof(object), typeof(string[]) }, true);
+            var dm = new DynamicMethod(string.Format("Deserialize{0}", Guid.NewGuid()), null, new[] { type, typeof(string[]) }, true);
             var properties = GetSettableProps(type);
             var setters = (
                 from n in keys
@@ -187,10 +129,6 @@ namespace OwinLight
             var il = dm.GetILGenerator();
             il.DeclareLocal(typeof(IList<string>)); //0
             il.DeclareLocal(typeof(string)); //1
-            il.DeclareLocal(type);//2
-            il.Emit(OpCodes.Ldarg_0);// [object]
-            il.Emit(OpCodes.Isinst, type);// [target]
-            il.Emit(OpCodes.Stloc_2);
             foreach (var item in setters)
             {
                 Type memberType = item.Property.Type;
@@ -218,7 +156,7 @@ namespace OwinLight
                     il.Emit(OpCodes.Ldloc_1);
                     il.Emit(OpCodes.Callvirt, typeof(string).GetProperty("Length").GetGetMethod());
                     il.Emit(OpCodes.Brfalse_S, label1);// stack is empty
-                    il.Emit(OpCodes.Ldloc_2);// [target]
+                    il.Emit(OpCodes.Ldarg_0);// [target]
                     il.Emit(OpCodes.Ldloc_1);// [target][string]
                     if (unboxType.IsEnum)
                     {
@@ -241,12 +179,12 @@ namespace OwinLight
                 }
             }
             il.Emit(OpCodes.Ret);
-            //return (Action<object, string[]>)dm.CreateDelegate(typeof(Action<object, string[]>));
             return dm;
         }
 
-        public static Func<IOwinContext, Task> GetOwinTask(Type type1, Type type2, Type type3, MethodInfo method, int maxlength)
+        public static Func<IOwinContext, Task> GetOwinTask(Type type1, Type type2, Type type3, MethodInfo method, int maxlength, string headers)
         {
+            var deserializer1 = GetTypeDeserializer(type2);
             var dm = new DynamicMethod(string.Format("OwinTask{0}", Guid.NewGuid()), typeof(Task), new[] { typeof(IOwinContext) }, true);
             ILGenerator il = dm.GetILGenerator();
             var alldone = il.DefineLabel();
@@ -385,7 +323,7 @@ namespace OwinLight
             il.Emit(OpCodes.Ldloc_S, (byte)4);
             il.Emit(OpCodes.Callvirt, typeof(Encoding).GetMethod("GetString", new[] { typeof(byte[]) }));
             il.Emit(OpCodes.Call, typeof(Microsoft.Owin.Helpers.WebHelpers).GetMethod("ParseForm", new[] { typeof(string) }));
-            il.Emit(OpCodes.Call, typeof(HttpHelper).GetMethod("Fill").MakeGenericMethod(type2));
+            il.Emit(OpCodes.Call, deserializer1);
             il.Emit(OpCodes.Leave, next);// stack is empty
 
             il.MarkLabel(label6);// stack is empty,处理multipart/form-data
@@ -401,7 +339,7 @@ namespace OwinLight
             il.Emit(OpCodes.Call, typeof(HttpHelper).GetMethod("ParseFormData"));
             il.Emit(OpCodes.Ldloc_S, (byte)6);
             il.Emit(OpCodes.Ldloc_S, (byte)7);
-            il.Emit(OpCodes.Call, typeof(HttpHelper).GetMethod("Fill").MakeGenericMethod(type2));
+            il.Emit(OpCodes.Call, deserializer1);
             if (typeof(IHasHttpFiles).IsAssignableFrom(type2))
             {
                 il.Emit(OpCodes.Ldloc_S, (byte)8);
@@ -462,7 +400,7 @@ namespace OwinLight
                 il.Emit(OpCodes.Ldloc_S, (byte)6);
                 il.Emit(OpCodes.Ldloc_0);
                 il.Emit(OpCodes.Callvirt, typeof(IOwinRequest).GetProperty("Query").GetGetMethod());
-                il.Emit(OpCodes.Call, typeof(HttpHelper).GetMethod("Fill").MakeGenericMethod(type2));
+                il.Emit(OpCodes.Call, deserializer1);
             }
             il.MarkLabel(label5);// stack is empty
             il.Emit(OpCodes.Ldloc_S, (byte)5);
@@ -535,9 +473,15 @@ namespace OwinLight
                 il.Emit(OpCodes.Callvirt, typeof(byte[]).GetProperty("LongLength").GetGetMethod());
                 il.Emit(OpCodes.Newobj, typeof(long?).GetConstructor(new[] { typeof(long) }));//[IOwinResponse][byte[]][IOwinResponse][long?]
                 il.Emit(OpCodes.Callvirt, typeof(IOwinResponse).GetProperty("ContentLength").GetSetMethod());
+                if (headers != null && headers.Contains(":"))//如果有自定义响应头，则添加，但前提是响应头尚未被发送过
+                {
+                    il.Emit(OpCodes.Ldloc_1);
+                    il.Emit(OpCodes.Ldstr, headers);
+                    il.Emit(OpCodes.Call, typeof(HttpHelper).GetMethod("SetResponseHeaders"));
+                }
                 il.MarkLabel(headsend1);
                 il.Emit(OpCodes.Callvirt, typeof(IOwinResponse).GetMethod("Write", new[] { typeof(byte[]) }));
-                il.Emit(OpCodes.Br_S, alldone);// stack is empty
+                il.Emit(OpCodes.Br, alldone);// stack is empty
 
                 il.MarkLabel(streamLabel);//[object]
                 il.Emit(OpCodes.Castclass, typeof(Stream));
@@ -556,8 +500,14 @@ namespace OwinLight
                 il.Emit(OpCodes.Callvirt, typeof(IOwinResponse).GetProperty("ContentLength").GetSetMethod());
                 il.BeginCatchBlock(typeof(object));
                 il.EndExceptionBlock();
-                il.BeginExceptionBlock();//捕获输出异常，最终处理IDisposable
+                if (headers != null && headers.Contains(":"))//如果有自定义响应头，则添加，但前提是响应头尚未被发送过
+                {
+                    il.Emit(OpCodes.Ldloc_1);
+                    il.Emit(OpCodes.Ldstr, headers);
+                    il.Emit(OpCodes.Call, typeof(HttpHelper).GetMethod("SetResponseHeaders"));
+                }
                 il.MarkLabel(headsend2);
+                il.BeginExceptionBlock();//捕获输出异常，最终处理IDisposable                
                 il.Emit(OpCodes.Ldloc_S, (byte)9);
                 il.Emit(OpCodes.Ldloc_1);
                 il.Emit(OpCodes.Callvirt, typeof(IOwinResponse).GetProperty("Body").GetGetMethod());
@@ -579,6 +529,12 @@ namespace OwinLight
                 il.Emit(OpCodes.Ldc_I8, 0L);
                 il.Emit(OpCodes.Newobj, typeof(long?).GetConstructor(new[] { typeof(long) }));
                 il.Emit(OpCodes.Callvirt, typeof(IOwinResponse).GetProperty("ContentLength").GetSetMethod());
+                if (headers != null && headers.Contains(":"))//如果有自定义响应头，则添加，但前提是响应头尚未被发送过
+                {
+                    il.Emit(OpCodes.Ldloc_1);
+                    il.Emit(OpCodes.Ldstr, headers);
+                    il.Emit(OpCodes.Call, typeof(HttpHelper).GetMethod("SetResponseHeaders"));
+                }
             }
             else
             {
@@ -589,6 +545,12 @@ namespace OwinLight
                 il.Emit(OpCodes.Ldc_I8, 0L);
                 il.Emit(OpCodes.Newobj, typeof(long?).GetConstructor(new[] { typeof(long) }));
                 il.Emit(OpCodes.Callvirt, typeof(IOwinResponse).GetProperty("ContentLength").GetSetMethod());
+                if (headers != null && headers.Contains(":"))//如果有自定义响应头，则添加，但前提是响应头尚未被发送过
+                {
+                    il.Emit(OpCodes.Ldloc_1);
+                    il.Emit(OpCodes.Ldstr, headers);
+                    il.Emit(OpCodes.Call, typeof(HttpHelper).GetMethod("SetResponseHeaders"));
+                }
             }
             il.MarkLabel(alldone);
             il.Emit(OpCodes.Ldsfld, typeof(HttpHelper).GetField("completeTask"));
@@ -606,9 +568,10 @@ namespace OwinLight
             return (Func<IOwinContext, Task>)dm.CreateDelegate(typeof(Func<IOwinContext, Task>));
         }
 
-        public static Func<IOwinContext, string[], Task> GetOwinRewriteTask(Type type1, Type type2, Type type3, MethodInfo method, int maxlength, List<Tuple<string, int>> keys)
+        public static Func<IOwinContext, string[], Task> GetOwinRewriteTask(Type type1, Type type2, Type type3, MethodInfo method, int maxlength, string headers, List<Tuple<string, int>> keys)
         {
-            var deserializer = GetTypeDeserializerFromArray(type2, keys);
+            var deserializer1 = GetTypeDeserializer(type2);
+            var deserializer2 = GetTypeDeserializerFromArray(type2, keys);
             var dm = new DynamicMethod(string.Format("OwinRegexTask{0}", Guid.NewGuid()), typeof(Task), new[] { typeof(IOwinContext), typeof(string[]) }, true);
             ILGenerator il = dm.GetILGenerator();
             var alldone = il.DefineLabel();
@@ -656,7 +619,7 @@ namespace OwinLight
             il.Emit(OpCodes.Dup);
             il.Emit(OpCodes.Stloc_S, (byte)6);//store type2
             il.Emit(OpCodes.Ldarg_1);//[type2][string[]]
-            il.Emit(OpCodes.Call, deserializer);
+            il.Emit(OpCodes.Call, deserializer2);
             il.Emit(OpCodes.Ldloc_0);
             il.Emit(OpCodes.Callvirt, typeof(IOwinRequest).GetProperty("Method").GetGetMethod());
             il.Emit(OpCodes.Ldstr, "POST");
@@ -733,7 +696,7 @@ namespace OwinLight
             il.Emit(OpCodes.Ldloc_S, (byte)4);
             il.Emit(OpCodes.Callvirt, typeof(Encoding).GetMethod("GetString", new[] { typeof(byte[]) }));
             il.Emit(OpCodes.Call, typeof(Microsoft.Owin.Helpers.WebHelpers).GetMethod("ParseForm", new[] { typeof(string) }));
-            il.Emit(OpCodes.Call, typeof(HttpHelper).GetMethod("Fill").MakeGenericMethod(type2));
+            il.Emit(OpCodes.Call, deserializer1);
             il.Emit(OpCodes.Leave, next);// stack is empty
 
             il.MarkLabel(label6);// stack is empty,处理multipart/form-data
@@ -749,7 +712,7 @@ namespace OwinLight
             il.Emit(OpCodes.Call, typeof(HttpHelper).GetMethod("ParseFormData"));
             il.Emit(OpCodes.Ldloc_S, (byte)6);
             il.Emit(OpCodes.Ldloc_S, (byte)7);
-            il.Emit(OpCodes.Call, typeof(HttpHelper).GetMethod("Fill").MakeGenericMethod(type2));
+            il.Emit(OpCodes.Call, deserializer1);
             if (typeof(IHasHttpFiles).IsAssignableFrom(type2))
             {
                 il.Emit(OpCodes.Ldloc_S, (byte)8);
@@ -808,7 +771,7 @@ namespace OwinLight
             il.Emit(OpCodes.Ldloc_S, (byte)6);
             il.Emit(OpCodes.Ldloc_0);
             il.Emit(OpCodes.Callvirt, typeof(IOwinRequest).GetProperty("Query").GetGetMethod());
-            il.Emit(OpCodes.Call, typeof(HttpHelper).GetMethod("Fill").MakeGenericMethod(type2));
+            il.Emit(OpCodes.Call, deserializer1);
             il.MarkLabel(label5);// stack is empty
             il.Emit(OpCodes.Ldloc_S, (byte)5);
             il.Emit(OpCodes.Ldloc_S, (byte)6);
@@ -879,9 +842,15 @@ namespace OwinLight
                 il.Emit(OpCodes.Callvirt, typeof(byte[]).GetProperty("LongLength").GetGetMethod());
                 il.Emit(OpCodes.Newobj, typeof(long?).GetConstructor(new[] { typeof(long) }));//[IOwinResponse][byte[]][IOwinResponse][long?]
                 il.Emit(OpCodes.Callvirt, typeof(IOwinResponse).GetProperty("ContentLength").GetSetMethod());
+                if (headers != null && headers.Contains(":"))//如果有自定义响应头，则添加，但前提是响应头尚未被发送过
+                {
+                    il.Emit(OpCodes.Ldloc_1);
+                    il.Emit(OpCodes.Ldstr, headers);
+                    il.Emit(OpCodes.Call, typeof(HttpHelper).GetMethod("SetResponseHeaders"));
+                }
                 il.MarkLabel(headsend1);
                 il.Emit(OpCodes.Callvirt, typeof(IOwinResponse).GetMethod("Write", new[] { typeof(byte[]) }));
-                il.Emit(OpCodes.Br_S, alldone);// stack is empty
+                il.Emit(OpCodes.Br, alldone);// stack is empty
 
                 il.MarkLabel(streamLabel);//[object]
                 il.Emit(OpCodes.Castclass, typeof(Stream));
@@ -899,9 +868,15 @@ namespace OwinLight
                 il.Emit(OpCodes.Newobj, typeof(long?).GetConstructor(new[] { typeof(long) }));
                 il.Emit(OpCodes.Callvirt, typeof(IOwinResponse).GetProperty("ContentLength").GetSetMethod());
                 il.BeginCatchBlock(typeof(object));
-                il.EndExceptionBlock();
-                il.BeginExceptionBlock();//捕获输出异常，最终处理IDisposable
+                il.EndExceptionBlock();                
+                if (headers != null && headers.Contains(":"))//如果有自定义响应头，则添加，但前提是响应头尚未被发送过
+                {
+                    il.Emit(OpCodes.Ldloc_1);
+                    il.Emit(OpCodes.Ldstr, headers);
+                    il.Emit(OpCodes.Call, typeof(HttpHelper).GetMethod("SetResponseHeaders"));
+                }
                 il.MarkLabel(headsend2);
+                il.BeginExceptionBlock();//捕获输出异常，最终处理IDisposable
                 il.Emit(OpCodes.Ldloc_S, (byte)9);
                 il.Emit(OpCodes.Ldloc_1);
                 il.Emit(OpCodes.Callvirt, typeof(IOwinResponse).GetProperty("Body").GetGetMethod());
@@ -923,6 +898,12 @@ namespace OwinLight
                 il.Emit(OpCodes.Ldc_I8, 0L);
                 il.Emit(OpCodes.Newobj, typeof(long?).GetConstructor(new[] { typeof(long) }));
                 il.Emit(OpCodes.Callvirt, typeof(IOwinResponse).GetProperty("ContentLength").GetSetMethod());
+                if (headers != null && headers.Contains(":"))//如果有自定义响应头，则添加，但前提是响应头尚未被发送过
+                {
+                    il.Emit(OpCodes.Ldloc_1);
+                    il.Emit(OpCodes.Ldstr, headers);
+                    il.Emit(OpCodes.Call, typeof(HttpHelper).GetMethod("SetResponseHeaders"));
+                }
             }
             else
             {
@@ -933,6 +914,12 @@ namespace OwinLight
                 il.Emit(OpCodes.Ldc_I8, 0L);
                 il.Emit(OpCodes.Newobj, typeof(long?).GetConstructor(new[] { typeof(long) }));
                 il.Emit(OpCodes.Callvirt, typeof(IOwinResponse).GetProperty("ContentLength").GetSetMethod());
+                if (headers != null && headers.Contains(":"))//如果有自定义响应头，则添加，但前提是响应头尚未被发送过
+                {
+                    il.Emit(OpCodes.Ldloc_1);
+                    il.Emit(OpCodes.Ldstr, headers);
+                    il.Emit(OpCodes.Call, typeof(HttpHelper).GetMethod("SetResponseHeaders"));
+                }
             }
             il.MarkLabel(alldone);
             il.Emit(OpCodes.Ldsfld, typeof(HttpHelper).GetField("completeTask"));
@@ -1112,20 +1099,6 @@ namespace OwinLight
             return completeTask;
         }
 
-        public static void Fill<T>(this T obj, IReadableStringCollection query)
-        {
-            if (query == null) return;
-            Type type = typeof(T);
-            QCacheInfo cache;
-            if (!TryGetQueryCache(type, out cache))
-            {
-                cache = new QCacheInfo();
-                cache.Deserializer = GetTypeDeserializer(type);
-                SetQueryCache(type, cache);
-            }
-            cache.Deserializer(obj, query);
-        }
-
         static Regex boundaryReg = new Regex(@"(?<=[:; ]boundary=)[^; ]*", RegexOptions.Compiled);
         public static void ParseFormData(MemoryStream ms, string ct, out ReadableStringCollection formValues, out List<HttpFile> files)
         {
@@ -1232,6 +1205,23 @@ namespace OwinLight
                     prePath.Add(src);
                     precount++;
                 }
+            }
+        }
+
+        /// <summary>
+        /// 设置响应的headers
+        /// </summary>
+        /// <param name="response">响应</param>
+        /// <param name="headers">key-value用冒号隔开，多个头用封号隔开</param>
+        public static void SetResponseHeaders(this IOwinResponse response, string headers)
+        {
+            string[] tmp1 = headers.Split(';');
+            int length = tmp1.Length;
+            for (int i = 0; i < length; i++)
+            {
+                string[] tmp2 = tmp1[i].Split(':');
+                if (tmp2.Length != 2) throw new Exception("自定义响应头格式有误");
+                response.Headers.Set(tmp2[0], tmp2[1]);
             }
         }
     }
