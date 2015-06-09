@@ -49,6 +49,7 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="MyRouteAttribute.cs" />
     <Compile Include="Demo.cs" />
     <Compile Include="FileGet.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

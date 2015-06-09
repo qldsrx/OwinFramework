@@ -24,7 +24,7 @@ namespace OwinLight.Test
     /// <summary>
     /// 普通属性接收来自URL或FORM表单的数据，接口属性存储文件，若非POST请求或文件个数为0，则接口属性为空。
     /// </summary>
-    [Route("/api/dog1", 65536)]
+    [MyRoute("/api/dog1", 65536)]
     public class DOG1 : IHasHttpFiles
     {
         public int? id { get; set; }
