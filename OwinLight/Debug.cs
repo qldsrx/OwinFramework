@@ -14,15 +14,15 @@ namespace OwinLight
         /// </summary>
         /// <param name="msg">消息</param>
         /// <param name="pre">前缀</param>
-        public static void Write(string msg, string pre = null)
+        public static void Write(string msg, string pre = "null")
         {
             if (System.Environment.NewLine == "\r\n")
             {
-                Console.WriteLine(DateTime.Now.ToString() + ":" + pre + msg + "\r\n");
+                Console.WriteLine(DateTime.Now.ToString() + "(" + pre + "):" + msg + "\r\n");
             }
             else
             {
-                File.AppendAllText("/tmp/OwinLight.log", DateTime.Now.ToString() + ":" + pre + msg + "\r\n");
+                File.AppendAllText("/tmp/OwinLight.log", DateTime.Now.ToString() + "(" + pre + "):" + msg + "\r\n");
             }
         }
     }

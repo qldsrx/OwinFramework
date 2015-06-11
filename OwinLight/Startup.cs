@@ -348,7 +348,7 @@ namespace OwinLight
                     }
                     catch (Exception e)
                     {
-                        Debug.Write(e.ToString());
+                        Debug.Write(e.ToString(), path);
                         response.StatusCode = 500;
                         response.ContentLength = 0;
                         return HttpHelper.completeTask;
