@@ -868,7 +868,7 @@ namespace OwinLight
                 il.Emit(OpCodes.Newobj, typeof(long?).GetConstructor(new[] { typeof(long) }));
                 il.Emit(OpCodes.Callvirt, typeof(IOwinResponse).GetProperty("ContentLength").GetSetMethod());
                 il.BeginCatchBlock(typeof(object));
-                il.EndExceptionBlock();                
+                il.EndExceptionBlock();
                 if (headers != null && headers.Contains(":"))//如果有自定义响应头，则添加，但前提是响应头尚未被发送过
                 {
                     il.Emit(OpCodes.Ldloc_1);
@@ -953,7 +953,15 @@ namespace OwinLight
 
             methods[typeof(string)] = new Func<string, string>(t => t).Method;
             methods[typeof(char)] = new Func<string, char>(t => t.Length > 0 ? t[0] : default(char)).Method;
-            methods[typeof(bool)] = typeof(bool).GetMethod("Parse", new[] { typeof(string) });
+            methods[typeof(bool)] = new Func<string, bool>(t =>
+                {
+                    int tmp;
+                    if (int.TryParse(t, out tmp))
+                    {
+                        return tmp != 0;
+                    }
+                    return String.Compare(t, "true", true) == 0;
+                }).Method;
             methods[typeof(byte)] = typeof(byte).GetMethod("Parse", new[] { typeof(string) });
             methods[typeof(sbyte)] = typeof(sbyte).GetMethod("Parse", new[] { typeof(string) });
             methods[typeof(short)] = typeof(short).GetMethod("Parse", new[] { typeof(string) });
@@ -1223,6 +1231,18 @@ namespace OwinLight
                 if (tmp2.Length != 2) throw new Exception("自定义响应头格式有误");
                 response.Headers.Set(tmp2[0], tmp2[1]);
             }
+        }
+
+        public static string Escape(string srcstr)
+        {
+            if (srcstr == null) return null;
+            return Uri.EscapeDataString(srcstr);
+        }
+
+        public static string Unescape(string srcstr)
+        {
+            if (srcstr == null) return null;
+            return Uri.UnescapeDataString(srcstr);
         }
     }
 }
