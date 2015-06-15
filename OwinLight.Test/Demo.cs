@@ -11,6 +11,7 @@ using ServiceStack;
 using System.Collections.Specialized;
 using System.Reflection.Emit;
 using System.Reflection;
+using System.Configuration;
 
 namespace OwinLight.Test
 {
@@ -62,7 +63,8 @@ namespace OwinLight.Test
             x.SetResult(null); //调用SetResult后，这个服务即转为完成状态
             context.Response.ContentType = "text/html; charset=utf-8";
             HttpHelper.WritePart(context, "<h1 style='color:red'>您好，Jexus是全球首款直接支持MS OWIN标准的WEB服务器！</h1>");
-            context.WritePart(context.Request.Cookies["api"] ?? "null");
+            string tt = null;
+            context.WritePart(tt.Escape() ?? "null");//示例：为null的对象，也可以使用点号调用其扩展方法的
             return x.Task;
         }
 
@@ -72,7 +74,7 @@ namespace OwinLight.Test
         public Task GetStaticFile(IOwinContext context)
         {
             if (context.Request.Method == "GET" && context.Request.Path.HasValue)
-            {                
+            {
                 string path = HttpHelper.GetMapPath(context.Request.Path.Value);
                 FileInfo fi = new FileInfo(path);
                 var response = context.Response;

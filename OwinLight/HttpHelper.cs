@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Configuration;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -941,6 +942,8 @@ namespace OwinLight
 
         public static Task completeTask;
         public static Task cancelTask;
+        public static KeyValueConfigurationCollection AppSettings;
+        public static ConnectionStringSettingsCollection ConnectionStrings;
         static HttpHelper()
         {
             var x = new TaskCompletionSource<object>();
@@ -950,6 +953,10 @@ namespace OwinLight
             x = new TaskCompletionSource<object>();
             x.SetCanceled();
             cancelTask = x.Task;
+
+            var config = ConfigurationManager.OpenMappedExeConfiguration(new ExeConfigurationFileMap() { ExeConfigFilename = HttpHelper.GetMapPath("web.config") }, ConfigurationUserLevel.None);
+            AppSettings = config.AppSettings.Settings;
+            ConnectionStrings = config.ConnectionStrings.ConnectionStrings;
 
             methods[typeof(string)] = new Func<string, string>(t => t).Method;
             methods[typeof(char)] = new Func<string, char>(t => t.Length > 0 ? t[0] : default(char)).Method;
@@ -1172,11 +1179,11 @@ namespace OwinLight
         {
             if (strPath == null)
             {
-                return AppDomain.CurrentDomain.BaseDirectory;
+                return Environment.CurrentDirectory;
             }
             else
             {
-                List<string> prePath = AppDomain.CurrentDomain.BaseDirectory.Split(new char[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries).ToList();
+                List<string> prePath = Environment.CurrentDirectory.Split(new char[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries).ToList();
                 List<string> srcPath = strPath.Split(new char[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries).ToList();
                 ComputePath(prePath, srcPath);
                 if (prePath.Count > 0 && prePath[0].Contains(":"))//windows
@@ -1233,13 +1240,13 @@ namespace OwinLight
             }
         }
 
-        public static string Escape(string srcstr)
+        public static string Escape(this string srcstr)
         {
             if (srcstr == null) return null;
             return Uri.EscapeDataString(srcstr);
         }
 
-        public static string Unescape(string srcstr)
+        public static string Unescape(this string srcstr)
         {
             if (srcstr == null) return null;
             return Uri.UnescapeDataString(srcstr);

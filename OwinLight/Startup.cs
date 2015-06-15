@@ -42,14 +42,15 @@ namespace OwinLight
             _verb_route.Add("POST", new Dictionary<string, Func<IOwinContext, Task>>());
             _rewrite_route = new RewritePathNode[rewritedepth];
 
-            if (ConfigurationManager.AppSettings.AllKeys.Contains("rewritedepth"))
+            if (HttpHelper.AppSettings.AllKeys.Contains("rewritedepth"))
             {
-                int.TryParse(ConfigurationManager.AppSettings["rewritedepth"], out rewritedepth);
+                Debug.Write("1");
+                int.TryParse(HttpHelper.AppSettings["rewritedepth"].Value, out rewritedepth);
             }
 
-            if (ConfigurationManager.AppSettings.AllKeys.Contains("responseheaders"))
+            if (HttpHelper.AppSettings.AllKeys.Contains("responseheaders"))
             {
-                responseheaders = ConfigurationManager.AppSettings["responseheaders"];
+                responseheaders = HttpHelper.AppSettings["responseheaders"].Value;
             }
         }
         /// <summary>
@@ -60,214 +61,212 @@ namespace OwinLight
             var bin = AppDomain.CurrentDomain.SetupInformation.PrivateBinPath;
             if (string.IsNullOrEmpty(bin))
             {
-                bin = AppDomain.CurrentDomain.BaseDirectory;
+                bin = Environment.CurrentDirectory;
             }
-            if (Directory.Exists(bin))
+            DirectoryInfo di = new DirectoryInfo(HttpHelper.GetMapPath("/bin"));
+            if (!di.Exists) di = new DirectoryInfo(HttpHelper.GetMapPath("/"));
+            var files = di.GetFiles("*.dll", SearchOption.AllDirectories);
+            if (files != null)
             {
-                var ds = new DirectoryInfo(bin);
-                var files = ds.GetFiles("*.dll", SearchOption.AllDirectories);
-                if (files != null)
+                Assembly assembly = null;
+                foreach (var f in files)
                 {
-                    Assembly assembly = null;
-                    foreach (var f in files)
+                    try
                     {
-                        try
-                        {
-                            assembly = AppDomain.CurrentDomain.Load(AssemblyName.GetAssemblyName(f.FullName));
-                        }
-                        catch (Exception e)
-                        {
-                            Debug.Write(e.Message);
-                            continue;
-                        }
+                        assembly = AppDomain.CurrentDomain.Load(AssemblyName.GetAssemblyName(f.FullName));
+                    }
+                    catch (Exception e)
+                    {
+                        Debug.Write(e.Message);
+                        continue;
+                    }
 
-                        var assemblyTypes = assembly.GetTypes();
-                        if (assemblyTypes != null)
+                    var assemblyTypes = assembly.GetTypes();
+                    if (assemblyTypes != null)
+                    {
+                        foreach (var type in assemblyTypes)
                         {
-                            foreach (var type in assemblyTypes)
+                            if (type.IsSubclassOf(typeof(BaseRoute)))
                             {
-                                if (type.IsSubclassOf(typeof(BaseRoute)))
+                                try
                                 {
-                                    try
-                                    {
-                                        BaseRoute ir = (BaseRoute)Activator.CreateInstance(type);
-                                    }
-                                    catch (Exception e)
-                                    {
-                                        Debug.Write(e.ToString());
-                                    }
+                                    BaseRoute ir = (BaseRoute)Activator.CreateInstance(type);
                                 }
-                                else if (typeof(IService).IsAssignableFrom(type))
+                                catch (Exception e)
                                 {
-                                    var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Instance);
-                                    foreach (var m in methods)
+                                    Debug.Write(e.ToString());
+                                }
+                            }
+                            else if (typeof(IService).IsAssignableFrom(type))
+                            {
+                                var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Instance);
+                                foreach (var m in methods)
+                                {
+                                    ParameterInfo[] param;
+                                    Type paramtype;
+                                    IEnumerable<RouteAttribute> arrts1;
+                                    IEnumerable<RewriteAttribute> arrts2;
+                                    Func<IOwinContext, Task> func;
+                                    bool isdone = false;
+                                    string headers = responseheaders;
+                                    arrts1 = m.GetCustomAttributes<RouteAttribute>(false);//处理函数直接注册的路由
+                                    param = m.GetParameters();
+                                    if (param.Length == 1)
                                     {
-                                        ParameterInfo[] param;
-                                        Type paramtype;
-                                        IEnumerable<RouteAttribute> arrts1;
-                                        IEnumerable<RewriteAttribute> arrts2;
-                                        Func<IOwinContext, Task> func;
-                                        bool isdone = false;
-                                        string headers = responseheaders;
-                                        arrts1 = m.GetCustomAttributes<RouteAttribute>(false);//处理函数直接注册的路由
-                                        param = m.GetParameters();
-                                        if (param.Length == 1)
+                                        foreach (var routeattr in arrts1)
                                         {
-                                            foreach (var routeattr in arrts1)
+                                            if (routeattr.Verbs == null)
                                             {
-                                                if (routeattr.Verbs == null)
+                                                if (!_all_route.ContainsKey(routeattr.Path))
                                                 {
-                                                    if (!_all_route.ContainsKey(routeattr.Path))
-                                                    {
-                                                        if (routeattr.Headers != null) headers = routeattr.Headers;
-                                                        func = HttpHelper.GetOwinTask(type, param[0].ParameterType, m.ReturnType, m, routeattr.MaxLength, headers);
-                                                        _all_route.Add(routeattr.Path, func);
-                                                        isdone = true;
-                                                    }
-                                                    else
-                                                    {
-                                                        Debug.Write(string.Format("Any路径重复注册. path:{0};param:{1};func:{2}", routeattr.Path, param[0].ParameterType.Name, m.Name));
-                                                    }
+                                                    if (routeattr.Headers != null) headers = routeattr.Headers;
+                                                    func = HttpHelper.GetOwinTask(type, param[0].ParameterType, m.ReturnType, m, routeattr.MaxLength, headers);
+                                                    _all_route.Add(routeattr.Path, func);
+                                                    isdone = true;
                                                 }
-                                                else if (routeattr.Verbs == "GET")
+                                                else
                                                 {
-                                                    var get_route = _verb_route["GET"];
-                                                    if (!get_route.ContainsKey(routeattr.Path))
-                                                    {
-                                                        if (routeattr.Headers != null) headers = routeattr.Headers;
-                                                        func = HttpHelper.GetOwinTask(type, param[0].ParameterType, m.ReturnType, m, routeattr.MaxLength, headers);
-                                                        get_route.Add(routeattr.Path, func);
-                                                    }
-                                                    else
-                                                    {
-                                                        Debug.Write(string.Format("Get路径重复注册. path:{0};param:{1};func:{2}", routeattr.Path, param[0].ParameterType.Name, m.Name));
-                                                    }
-                                                }
-                                                else if (routeattr.Verbs == "POST")
-                                                {
-                                                    var post_route = _verb_route["POST"];
-                                                    if (!post_route.ContainsKey(routeattr.Path))
-                                                    {
-                                                        if (routeattr.Headers != null) headers = routeattr.Headers;
-                                                        func = HttpHelper.GetOwinTask(type, param[0].ParameterType, m.ReturnType, m, routeattr.MaxLength, headers);
-                                                        post_route.Add(routeattr.Path, func);
-                                                    }
-                                                    else
-                                                    {
-                                                        Debug.Write(string.Format("Post路径重复注册. path:{0};param:{1};func:{2}", routeattr.Path, param[0].ParameterType.Name, m.Name));
-                                                    }
+                                                    Debug.Write(string.Format("Any路径重复注册. path:{0};param:{1};func:{2}", routeattr.Path, param[0].ParameterType.Name, m.Name));
                                                 }
                                             }
-                                            if (!isdone)//处理参数类路由
+                                            else if (routeattr.Verbs == "GET")
                                             {
-                                                switch (m.Name)
+                                                var get_route = _verb_route["GET"];
+                                                if (!get_route.ContainsKey(routeattr.Path))
                                                 {
-                                                    case "Any":
-                                                        paramtype = param[0].ParameterType;
-                                                        arrts1 = paramtype.GetCustomAttributes<RouteAttribute>(false);
-                                                        foreach (var routeattr in arrts1)
-                                                        {
-                                                            if (!_all_route.ContainsKey(routeattr.Path))
-                                                            {
-                                                                if (routeattr.Headers != null) headers = routeattr.Headers;
-                                                                func = HttpHelper.GetOwinTask(type, paramtype, m.ReturnType, m, routeattr.MaxLength, headers);
-                                                                _all_route.Add(routeattr.Path, func);
-                                                            }
-                                                            else
-                                                            {
-                                                                Debug.Write(string.Format("Any路径重复注册. path:{0};param:{1};func:{2}", routeattr.Path, paramtype.Name, m.Name));
-                                                            }
-                                                        }
-                                                        break;
-                                                    case "Get":
-                                                        paramtype = param[0].ParameterType;
-                                                        arrts1 = paramtype.GetCustomAttributes<RouteAttribute>(false);
-                                                        foreach (var routeattr in arrts1)
-                                                        {
-                                                            var get_route = _verb_route["GET"];
-                                                            if (!get_route.ContainsKey(routeattr.Path))
-                                                            {
-                                                                if (routeattr.Headers != null) headers = routeattr.Headers;
-                                                                func = HttpHelper.GetOwinTask(type, paramtype, m.ReturnType, m, routeattr.MaxLength, headers);
-                                                                get_route.Add(routeattr.Path, func);
-                                                            }
-                                                            else
-                                                            {
-                                                                Debug.Write(string.Format("Get路径重复注册. path:{0};param:{1};func:{2}", routeattr.Path, paramtype.Name, m.Name));
-                                                            }
-                                                        }
-                                                        break;
-                                                    case "Post":
-                                                        paramtype = param[0].ParameterType;
-                                                        arrts1 = paramtype.GetCustomAttributes<RouteAttribute>(false);
-                                                        foreach (var routeattr in arrts1)
-                                                        {
-                                                            var post_route = _verb_route["POST"];
-                                                            if (!post_route.ContainsKey(routeattr.Path))
-                                                            {
-                                                                if (routeattr.Headers != null) headers = routeattr.Headers;
-                                                                func = HttpHelper.GetOwinTask(type, paramtype, m.ReturnType, m, routeattr.MaxLength, headers);
-                                                                post_route.Add(routeattr.Path, func);
-                                                            }
-                                                            else
-                                                            {
-                                                                Debug.Write(string.Format("Post路径重复注册. path:{0};param:{1};func:{2}", routeattr.Path, paramtype.Name, m.Name));
-                                                            }
-                                                        }
-                                                        break;
-                                                    default:
-                                                        break;
+                                                    if (routeattr.Headers != null) headers = routeattr.Headers;
+                                                    func = HttpHelper.GetOwinTask(type, param[0].ParameterType, m.ReturnType, m, routeattr.MaxLength, headers);
+                                                    get_route.Add(routeattr.Path, func);
+                                                }
+                                                else
+                                                {
+                                                    Debug.Write(string.Format("Get路径重复注册. path:{0};param:{1};func:{2}", routeattr.Path, param[0].ParameterType.Name, m.Name));
                                                 }
                                             }
-                                            //处理伪静态路径（只判断POCO的参数类）
-                                            if (m.Name == "Rewrite")
+                                            else if (routeattr.Verbs == "POST")
                                             {
-                                                paramtype = param[0].ParameterType;
-                                                arrts2 = paramtype.GetCustomAttributes<RewriteAttribute>(false);
-                                                foreach (var rewriteattr in arrts2)
+                                                var post_route = _verb_route["POST"];
+                                                if (!post_route.ContainsKey(routeattr.Path))
                                                 {
-                                                    string[] subpaths = rewriteattr.Path.Split(new char[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
-                                                    int length = subpaths.Length;
-                                                    string pathnode;
-                                                    bool isgoing = true;
-                                                    RewritePathNode n1, n2;
-                                                    n1 = _rewrite_route[length - 1];
-                                                    if (n1 == null)
+                                                    if (routeattr.Headers != null) headers = routeattr.Headers;
+                                                    func = HttpHelper.GetOwinTask(type, param[0].ParameterType, m.ReturnType, m, routeattr.MaxLength, headers);
+                                                    post_route.Add(routeattr.Path, func);
+                                                }
+                                                else
+                                                {
+                                                    Debug.Write(string.Format("Post路径重复注册. path:{0};param:{1};func:{2}", routeattr.Path, param[0].ParameterType.Name, m.Name));
+                                                }
+                                            }
+                                        }
+                                        if (!isdone)//处理参数类路由
+                                        {
+                                            switch (m.Name)
+                                            {
+                                                case "Any":
+                                                    paramtype = param[0].ParameterType;
+                                                    arrts1 = paramtype.GetCustomAttributes<RouteAttribute>(false);
+                                                    foreach (var routeattr in arrts1)
                                                     {
-                                                        n1 = new RewritePathNode() { chindren = new Dictionary<string, RewritePathNode>() };
-                                                        _rewrite_route[length - 1] = n1;
-                                                    }
-                                                    List<Tuple<string, int>> keys = new List<Tuple<string, int>>();
-                                                    for (int i = 0; i < length; i++)
-                                                    {
-                                                        pathnode = subpaths[i];
-                                                        if (pathnode[0] == '{' && pathnode[pathnode.Length - 1] == '}')
+                                                        if (!_all_route.ContainsKey(routeattr.Path))
                                                         {
-                                                            isgoing = false;
-                                                            keys.Add(new Tuple<string, int>(pathnode.Substring(1, pathnode.Length - 2), i));
+                                                            if (routeattr.Headers != null) headers = routeattr.Headers;
+                                                            func = HttpHelper.GetOwinTask(type, paramtype, m.ReturnType, m, routeattr.MaxLength, headers);
+                                                            _all_route.Add(routeattr.Path, func);
                                                         }
                                                         else
                                                         {
-                                                            if (isgoing)
-                                                            {
-                                                                if (!n1.chindren.TryGetValue(pathnode, out n2))
-                                                                {
-                                                                    n2 = new RewritePathNode() { chindren = new Dictionary<string, RewritePathNode>() };
-                                                                    n1.chindren.Add(pathnode, n2);
-                                                                }
-                                                                n1 = n2;
-                                                            }
+                                                            Debug.Write(string.Format("Any路径重复注册. path:{0};param:{1};func:{2}", routeattr.Path, paramtype.Name, m.Name));
                                                         }
                                                     }
-                                                    if (n1.func == null)
+                                                    break;
+                                                case "Get":
+                                                    paramtype = param[0].ParameterType;
+                                                    arrts1 = paramtype.GetCustomAttributes<RouteAttribute>(false);
+                                                    foreach (var routeattr in arrts1)
                                                     {
-                                                        if (rewriteattr.Headers != null) headers = rewriteattr.Headers;
-                                                        n1.func = HttpHelper.GetOwinRewriteTask(type, paramtype, m.ReturnType, m, rewriteattr.MaxLength, headers, keys);
+                                                        var get_route = _verb_route["GET"];
+                                                        if (!get_route.ContainsKey(routeattr.Path))
+                                                        {
+                                                            if (routeattr.Headers != null) headers = routeattr.Headers;
+                                                            func = HttpHelper.GetOwinTask(type, paramtype, m.ReturnType, m, routeattr.MaxLength, headers);
+                                                            get_route.Add(routeattr.Path, func);
+                                                        }
+                                                        else
+                                                        {
+                                                            Debug.Write(string.Format("Get路径重复注册. path:{0};param:{1};func:{2}", routeattr.Path, paramtype.Name, m.Name));
+                                                        }
+                                                    }
+                                                    break;
+                                                case "Post":
+                                                    paramtype = param[0].ParameterType;
+                                                    arrts1 = paramtype.GetCustomAttributes<RouteAttribute>(false);
+                                                    foreach (var routeattr in arrts1)
+                                                    {
+                                                        var post_route = _verb_route["POST"];
+                                                        if (!post_route.ContainsKey(routeattr.Path))
+                                                        {
+                                                            if (routeattr.Headers != null) headers = routeattr.Headers;
+                                                            func = HttpHelper.GetOwinTask(type, paramtype, m.ReturnType, m, routeattr.MaxLength, headers);
+                                                            post_route.Add(routeattr.Path, func);
+                                                        }
+                                                        else
+                                                        {
+                                                            Debug.Write(string.Format("Post路径重复注册. path:{0};param:{1};func:{2}", routeattr.Path, paramtype.Name, m.Name));
+                                                        }
+                                                    }
+                                                    break;
+                                                default:
+                                                    break;
+                                            }
+                                        }
+                                        //处理伪静态路径（只判断POCO的参数类）
+                                        if (m.Name == "Rewrite")
+                                        {
+                                            paramtype = param[0].ParameterType;
+                                            arrts2 = paramtype.GetCustomAttributes<RewriteAttribute>(false);
+                                            foreach (var rewriteattr in arrts2)
+                                            {
+                                                string[] subpaths = rewriteattr.Path.Split(new char[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
+                                                int length = subpaths.Length;
+                                                string pathnode;
+                                                bool isgoing = true;
+                                                RewritePathNode n1, n2;
+                                                n1 = _rewrite_route[length - 1];
+                                                if (n1 == null)
+                                                {
+                                                    n1 = new RewritePathNode() { chindren = new Dictionary<string, RewritePathNode>() };
+                                                    _rewrite_route[length - 1] = n1;
+                                                }
+                                                List<Tuple<string, int>> keys = new List<Tuple<string, int>>();
+                                                for (int i = 0; i < length; i++)
+                                                {
+                                                    pathnode = subpaths[i];
+                                                    if (pathnode[0] == '{' && pathnode[pathnode.Length - 1] == '}')
+                                                    {
+                                                        isgoing = false;
+                                                        keys.Add(new Tuple<string, int>(pathnode.Substring(1, pathnode.Length - 2), i));
                                                     }
                                                     else
                                                     {
-                                                        Debug.Write(string.Format("Rewrite路径重复注册. path:{0};param:{1};func:{2}", rewriteattr.Path, paramtype.Name, m.Name));
+                                                        if (isgoing)
+                                                        {
+                                                            if (!n1.chindren.TryGetValue(pathnode, out n2))
+                                                            {
+                                                                n2 = new RewritePathNode() { chindren = new Dictionary<string, RewritePathNode>() };
+                                                                n1.chindren.Add(pathnode, n2);
+                                                            }
+                                                            n1 = n2;
+                                                        }
                                                     }
+                                                }
+                                                if (n1.func == null)
+                                                {
+                                                    if (rewriteattr.Headers != null) headers = rewriteattr.Headers;
+                                                    n1.func = HttpHelper.GetOwinRewriteTask(type, paramtype, m.ReturnType, m, rewriteattr.MaxLength, headers, keys);
+                                                }
+                                                else
+                                                {
+                                                    Debug.Write(string.Format("Rewrite路径重复注册. path:{0};param:{1};func:{2}", rewriteattr.Path, paramtype.Name, m.Name));
                                                 }
                                             }
                                         }
