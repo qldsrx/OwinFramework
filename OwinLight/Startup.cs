@@ -47,10 +47,21 @@ namespace OwinLight
                 Debug.Write("1");
                 int.TryParse(HttpHelper.AppSettings["rewritedepth"].Value, out rewritedepth);
             }
+            else if (ConfigurationManager.AppSettings.AllKeys.Contains("rewritedepth"))
+            {
+                Debug.Write("2");
+                int.TryParse(ConfigurationManager.AppSettings["rewritedepth"], out rewritedepth);
+            }
 
             if (HttpHelper.AppSettings.AllKeys.Contains("responseheaders"))
             {
+                Debug.Write("1");
                 responseheaders = HttpHelper.AppSettings["responseheaders"].Value;
+            }
+            else if (ConfigurationManager.AppSettings.AllKeys.Contains("responseheaders"))
+            {
+                Debug.Write("2");
+                responseheaders = ConfigurationManager.AppSettings["responseheaders"];
             }
         }
         /// <summary>
