@@ -942,8 +942,6 @@ namespace OwinLight
 
         public static Task completeTask;
         public static Task cancelTask;
-        public static KeyValueConfigurationCollection AppSettings;
-        public static ConnectionStringSettingsCollection ConnectionStrings;
         static HttpHelper()
         {
             var x = new TaskCompletionSource<object>();
@@ -953,10 +951,6 @@ namespace OwinLight
             x = new TaskCompletionSource<object>();
             x.SetCanceled();
             cancelTask = x.Task;
-
-            var config = ConfigurationManager.OpenMappedExeConfiguration(new ExeConfigurationFileMap() { ExeConfigFilename = HttpHelper.GetMapPath("web.config") }, ConfigurationUserLevel.None);
-            AppSettings = config.AppSettings.Settings;
-            ConnectionStrings = config.ConnectionStrings.ConnectionStrings;
 
             methods[typeof(string)] = new Func<string, string>(t => t).Method;
             methods[typeof(char)] = new Func<string, char>(t => t.Length > 0 ? t[0] : default(char)).Method;
@@ -1170,20 +1164,21 @@ namespace OwinLight
             response.ContentLength = rangeEnd - rangeStart + 1;
         }
 
+        static string rootPath = (AppDomain.CurrentDomain.GetData(".appPath") as string) ?? Environment.CurrentDirectory;
         /// <summary>
         /// 获得当前绝对路径，同时兼容windows和linux（系统自带的都不兼容）。
         /// </summary>
         /// <param name="strPath">指定的路径，支持/|./|../分割</param>
         /// <returns>绝对路径，不带/后缀</returns>
         public static string GetMapPath(string strPath)
-        {
+        {            
             if (strPath == null)
             {
-                return Environment.CurrentDirectory;
+                return rootPath;
             }
             else
             {
-                List<string> prePath = Environment.CurrentDirectory.Split(new char[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries).ToList();
+                List<string> prePath = rootPath.Split(new char[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries).ToList();
                 List<string> srcPath = strPath.Split(new char[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries).ToList();
                 ComputePath(prePath, srcPath);
                 if (prePath.Count > 0 && prePath[0].Contains(":"))//windows

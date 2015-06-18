@@ -42,25 +42,12 @@ namespace OwinLight
             _verb_route.Add("POST", new Dictionary<string, Func<IOwinContext, Task>>());
             _rewrite_route = new RewritePathNode[rewritedepth];
 
-            if (HttpHelper.AppSettings.AllKeys.Contains("rewritedepth"))
+            if (ConfigurationManager.AppSettings.AllKeys.Contains("rewritedepth"))
             {
-                Debug.Write("1");
-                int.TryParse(HttpHelper.AppSettings["rewritedepth"].Value, out rewritedepth);
-            }
-            else if (ConfigurationManager.AppSettings.AllKeys.Contains("rewritedepth"))
-            {
-                Debug.Write("2");
                 int.TryParse(ConfigurationManager.AppSettings["rewritedepth"], out rewritedepth);
             }
-
-            if (HttpHelper.AppSettings.AllKeys.Contains("responseheaders"))
+            if (ConfigurationManager.AppSettings.AllKeys.Contains("responseheaders"))
             {
-                Debug.Write("1");
-                responseheaders = HttpHelper.AppSettings["responseheaders"].Value;
-            }
-            else if (ConfigurationManager.AppSettings.AllKeys.Contains("responseheaders"))
-            {
-                Debug.Write("2");
                 responseheaders = ConfigurationManager.AppSettings["responseheaders"];
             }
         }
@@ -69,11 +56,6 @@ namespace OwinLight
         /// </summary>
         public Startup()
         {
-            var bin = AppDomain.CurrentDomain.SetupInformation.PrivateBinPath;
-            if (string.IsNullOrEmpty(bin))
-            {
-                bin = Environment.CurrentDirectory;
-            }
             DirectoryInfo di = new DirectoryInfo(HttpHelper.GetMapPath("/bin"));
             if (!di.Exists) di = new DirectoryInfo(HttpHelper.GetMapPath("/"));
             var files = di.GetFiles("*.dll", SearchOption.AllDirectories);
