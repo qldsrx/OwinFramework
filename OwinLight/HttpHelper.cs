@@ -185,7 +185,8 @@ namespace OwinLight
 
         public static Func<IOwinContext, Task> GetOwinTask(Type type1, Type type2, Type type3, MethodInfo method, int maxlength, string headers)
         {
-            var deserializer1 = GetTypeDeserializer(type2);
+            DynamicMethod deserializer1 = null;
+            if (type2 != typeof(Stream) && type2 != typeof(String)) deserializer1 = GetTypeDeserializer(type2);
             var dm = new DynamicMethod(string.Format("OwinTask{0}", Guid.NewGuid()), typeof(Task), new[] { typeof(IOwinContext) }, true);
             ILGenerator il = dm.GetILGenerator();
             var alldone = il.DefineLabel();
@@ -1171,7 +1172,7 @@ namespace OwinLight
         /// <param name="strPath">指定的路径，支持/|./|../分割</param>
         /// <returns>绝对路径，不带/后缀</returns>
         public static string GetMapPath(string strPath)
-        {            
+        {
             if (strPath == null)
             {
                 return rootPath;

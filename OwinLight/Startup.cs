@@ -73,8 +73,12 @@ namespace OwinLight
                         Debug.Write(e.Message);
                         continue;
                     }
-
-                    var assemblyTypes = assembly.GetTypes();
+                    Type[] assemblyTypes = null;
+                    try
+                    {
+                        assemblyTypes = assembly.GetTypes();
+                    }
+                    catch { Console.WriteLine("GetTypes Error!"); }
                     if (assemblyTypes != null)
                     {
                         foreach (var type in assemblyTypes)

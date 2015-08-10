@@ -132,12 +132,12 @@ namespace OwinLight.Test
             return sr.ReadToEnd();
         }
 
-        public string Rewrite(FileGet request)
-        {
-            Response.ContentType = "text/html; charset=utf-8";
-            //Response.Write(string.Format("<h1 style='color:red'>fileid:{0}<br/>filename:{1}</h1>", request.fileid, request.filename));
-            return string.Format("<h1 style='color:red'>fileid:{0}<br/>filename:{1}</h1>", request.fileid, request.filename);
-        }
+    public string Rewrite(FileGet request)
+    {
+        Response.ContentType = "text/html; charset=utf-8";
+        //Response.Write(string.Format("<h1 style='color:red'>fileid:{0}<br/>filename:{1}</h1>", request.fileid, request.filename));
+        return string.Format("<h1 style='color:red'>fileid:{0}<br/>filename:{1}</h1>", request.fileid, request.filename);
+    }
 
         /// <summary>
         /// 测试字符串参数，通过函数路由添加，这里请求不区分GET还是POST，GET时，参数为空，路由限制最多接收1024字节内容
