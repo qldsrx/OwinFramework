@@ -283,16 +283,16 @@ ParseFormData，解析Form表单数据，如果你要以Stream或String接收Pos
         }
     }
 }
-```
+　　```
 ### 跨域Post的支持
 　　　IE8+、谷歌、火狐等浏览器均支持，不考虑IE6的话，可以使用这个功能
 ```xml
-　　　 <appSettings>
-    <!--伪静态路径最大深度-->
-    <add key="rewritedepth" value="10"/>
-    <!--自定义响应头，key-value用冒号隔开，多个头用封号隔开-->
-    <add key="responseheaders" value="Access-Control-Allow-Origin:*;Access-Control-Allow-Methods:GET,POST;Access-Control-Allow-Headers:Content-Type"/>
-  </appSettings>
+<appSettings>
+  <!--伪静态路径最大深度-->
+  <add key="rewritedepth" value="10"/>
+  <!--自定义响应头，key-value用冒号隔开，多个头用封号隔开-->
+  <add key="responseheaders" value="Access-Control-Allow-Origin:*;Access-Control-Allow-Methods:GET,POST;Access-Control-Allow-Headers:Content-Type"/>
+</appSettings>
 ```
 　　在配置文件里添加如下代码，注释已经很清楚了。而Owin本身没要求配置文件，所以，你的宿主可能不提供配置文件，那么你只是在你的网站根目录下面放一个web.config，我框架会优先查找这个文件的配置，查找不到的情况才会去用应用程序默认的配置文件。HttpHelper.AppSettings用来访问web.config下面的appSettings节点，HttpHelper.ConnectionStrings用来访问web.config下面的connectionStrings节点。
 　　
