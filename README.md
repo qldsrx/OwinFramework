@@ -234,16 +234,16 @@ ParseFormData，解析Form表单数据，如果你要以Stream或String接收Pos
 ### 复合类型的请求处理
 除了简单的POCO类型外，自定义类的属性可以是某个Model类型，这种就是复合类型，此时用来接收POST请求提交的Json数据，同时，url参数也会在Json数据接收后，被添加到自定义类型的简单属性上，确保Query的参数也被自动填充。
 
-　　你也可以用Dictionary<string,object>类型作为请求的参数，此时将Route特性定义到处理函数上即可，POST传递的Json数据，将自动反序列化到这个字典类型上。
+　你也可以用Dictionary<string,object>类型作为请求的参数，此时将Route特性定义到处理函数上即可，POST传递的Json数据，将自动反序列化到这个字典类型上。
 　　
 ## 框架的扩展
-　　框架是开源的，可以随便更改。如果希望有后期的支持，请提交需求让我来修改，或者记住自己的改动部分，以便下次合并修改。
+　框架是开源的，可以随便更改。如果希望有后期的支持，请提交需求让我来修改，或者记住自己的改动部分，以便下次合并修改。
 
 　　HttpHelper类是框架的核心处理类，其静态函数里面定义了大量的类型转换函数，这里可以自己添加不存在的类型，或者修改已经存在的类型处理。类型分为两类，数组和非数组，其传递的参数是不同的，源码中有示例，这里不展开了。源码中有段“#if DEBUG”代码，用来设置是否对参数处理过程发生的异常做记录，如果项目是在Debug下面编译的，就会记录，此时如果POST请求的数据不是xml或json格式，却要强制进行转换，就会记录到异常。应用层的异常自行决定是否要捕获，前面的是框架处理过程的异常。另外还有一个Debug类，里面就一个方法Write，框架中用来输入各种异常都会调用它。你可以修改输出的路径，也可以对日志输出进行一些缓存处理，再或者直接不做任何处理，屏蔽掉处理代码。
 　　
-　　### 静态内容的支持
+### 静态内容的支持
 　　下面给一个通过默认处理函数，添加静态页响应的示例，仅供测试用
-　　```cs
+```cs
 　　public class Class1:BaseRoute
 {
     public Class1()
@@ -284,22 +284,22 @@ ParseFormData，解析Form表单数据，如果你要以Stream或String接收Pos
     }
 }
 　　```
-　### 跨域Post的支持
+### 跨域Post的支持
 　　　IE8+、谷歌、火狐等浏览器均支持，不考虑IE6的话，可以使用这个功能
-　　　```xml
+```xml
 　　　 <appSettings>
     <!--伪静态路径最大深度-->
     <add key="rewritedepth" value="10"/>
     <!--自定义响应头，key-value用冒号隔开，多个头用封号隔开-->
     <add key="responseheaders" value="Access-Control-Allow-Origin:*;Access-Control-Allow-Methods:GET,POST;Access-Control-Allow-Headers:Content-Type"/>
   </appSettings>
-　　　```
+```
 　　在配置文件里添加如下代码，注释已经很清楚了。而Owin本身没要求配置文件，所以，你的宿主可能不提供配置文件，那么你只是在你的网站根目录下面放一个web.config，我框架会优先查找这个文件的配置，查找不到的情况才会去用应用程序默认的配置文件。HttpHelper.AppSettings用来访问web.config下面的appSettings节点，HttpHelper.ConnectionStrings用来访问web.config下面的connectionStrings节点。
 　　
-　　### 基础类型继承灵活处理
+### 基础类型继承灵活处理
 　　BaseRoute类一般很少会用，也没什么好说的。BaseService类用的最多，用它可以极大的提高开发效率，同时你也可以继承该类实现更多的便利，下面我再给一段示例，演示如何自己继承BaseService或IService来减少编码。可以将这个MyService作为基类，再派生出相关处理下面的类。
-　　```cs
-　　/// <summary>
+```cs
+/// <summary>
 /// 自定义服务类示例，添加令牌、数据库支持。
 /// </summary>
 public class MyService : BaseService, IDisposable
@@ -346,7 +346,7 @@ public class MyService : BaseService, IDisposable
             db.Dispose();
     }
 }
-　　```
+```
 
 　ORM操作推荐用Dapper，性能最高。这里Db属性有了，Dapper的使用就非常简单了，因为Dapper的操作都是基于连接类的扩展方法。
 
