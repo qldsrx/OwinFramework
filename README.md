@@ -283,7 +283,7 @@ ParseFormData，解析Form表单数据，如果你要以Stream或String接收Pos
         }
     }
 }
-　　```
+```
 ### 跨域Post的支持
 　　　IE8+、谷歌、火狐等浏览器均支持，不考虑IE6的话，可以使用这个功能
 ```xml
