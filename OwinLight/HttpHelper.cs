@@ -46,7 +46,15 @@ namespace OwinLight
         static DynamicMethod GetTypeDeserializer(Type type)
         {
             var dm = new DynamicMethod(string.Format("Deserialize{0}", Guid.NewGuid()), null, new[] { type, typeof(IReadableStringCollection) }, true);
-            var properties = GetSettableProps(type);
+            List<PropInfo> properties;
+            try
+            {
+                properties = GetSettableProps(type);
+            }
+            catch
+            {
+                properties = new List<PropInfo>();
+            }
             var il = dm.GetILGenerator();
             il.DeclareLocal(typeof(IList<string>)); //0
             il.DeclareLocal(typeof(string)); //1
@@ -310,87 +318,89 @@ namespace OwinLight
                 il.Emit(OpCodes.Stloc_S, (byte)6);
                 il.Emit(OpCodes.Br, label5);// stack is empty
             }
-            il.BeginExceptionBlock();
-            il.Emit(OpCodes.Ldloc_0);
-            il.Emit(OpCodes.Callvirt, typeof(IOwinRequest).GetProperty("ContentType").GetGetMethod());
-            il.Emit(OpCodes.Dup);
-            il.Emit(OpCodes.Stloc_2);
-            il.Emit(OpCodes.Brfalse, label4);
-            il.Emit(OpCodes.Ldloc_2);
-            il.Emit(OpCodes.Ldstr, "x-www-form-urlencoded");
-            il.Emit(OpCodes.Callvirt, typeof(String).GetMethod("Contains"));
-            il.Emit(OpCodes.Brfalse_S, label6);// stack is empty
-            il.Emit(OpCodes.Ldloc_S, (byte)6);
-            il.Emit(OpCodes.Call, typeof(Encoding).GetProperty("UTF8").GetGetMethod());
-            il.Emit(OpCodes.Ldloc_S, (byte)4);
-            il.Emit(OpCodes.Callvirt, typeof(Encoding).GetMethod("GetString", new[] { typeof(byte[]) }));
-            il.Emit(OpCodes.Call, typeof(Microsoft.Owin.Helpers.WebHelpers).GetMethod("ParseForm", new[] { typeof(string) }));
-            il.Emit(OpCodes.Call, deserializer1);
-            il.Emit(OpCodes.Leave, next);// stack is empty
-
-            il.MarkLabel(label6);// stack is empty,处理multipart/form-data
-            il.Emit(OpCodes.Ldloc_2);
-            il.Emit(OpCodes.Ldstr, "multipart/form-data");
-            il.Emit(OpCodes.Callvirt, typeof(String).GetMethod("Contains"));
-            il.Emit(OpCodes.Brfalse_S, label2);// stack is empty
-            il.Emit(OpCodes.Ldloc_S, (byte)4);
-            il.Emit(OpCodes.Newobj, typeof(MemoryStream).GetConstructor(new[] { typeof(byte[]) }));
-            il.Emit(OpCodes.Ldloc_2);
-            il.Emit(OpCodes.Ldloca_S, (byte)7);
-            il.Emit(OpCodes.Ldloca_S, (byte)8);
-            il.Emit(OpCodes.Call, typeof(HttpHelper).GetMethod("ParseFormData"));
-            il.Emit(OpCodes.Ldloc_S, (byte)6);
-            il.Emit(OpCodes.Ldloc_S, (byte)7);
-            il.Emit(OpCodes.Call, deserializer1);
-            if (typeof(IHasHttpFiles).IsAssignableFrom(type2))
+            if (type2 != typeof(string) && type2 != typeof(Stream))
             {
-                il.Emit(OpCodes.Ldloc_S, (byte)8);
-                il.Emit(OpCodes.Callvirt, typeof(List<HttpFile>).GetProperty("Count").GetGetMethod());
-                il.Emit(OpCodes.Brfalse_S, label7);
+                il.BeginExceptionBlock();
+                il.Emit(OpCodes.Ldloc_0);
+                il.Emit(OpCodes.Callvirt, typeof(IOwinRequest).GetProperty("ContentType").GetGetMethod());
+                il.Emit(OpCodes.Dup);
+                il.Emit(OpCodes.Stloc_2);
+                il.Emit(OpCodes.Brfalse, label4);
+                il.Emit(OpCodes.Ldloc_2);
+                il.Emit(OpCodes.Ldstr, "x-www-form-urlencoded");
+                il.Emit(OpCodes.Callvirt, typeof(String).GetMethod("Contains"));
+                il.Emit(OpCodes.Brfalse_S, label6);// stack is empty
                 il.Emit(OpCodes.Ldloc_S, (byte)6);
-                il.Emit(OpCodes.Ldloc_S, (byte)8);
-                il.Emit(OpCodes.Callvirt, typeof(IHasHttpFiles).GetProperty("HttpFiles").GetSetMethod());
-                il.MarkLabel(label7);
-            }
-            il.Emit(OpCodes.Leave_S, next);// stack is empty
+                il.Emit(OpCodes.Call, typeof(Encoding).GetProperty("UTF8").GetGetMethod());
+                il.Emit(OpCodes.Ldloc_S, (byte)4);
+                il.Emit(OpCodes.Callvirt, typeof(Encoding).GetMethod("GetString", new[] { typeof(byte[]) }));
+                il.Emit(OpCodes.Call, typeof(Microsoft.Owin.Helpers.WebHelpers).GetMethod("ParseForm", new[] { typeof(string) }));
+                il.Emit(OpCodes.Call, deserializer1);
+                il.Emit(OpCodes.Leave, next);// stack is empty
 
-            il.MarkLabel(label2);// stack is empty,处理xml反序列化
-            il.Emit(OpCodes.Ldloc_2);
-            il.Emit(OpCodes.Ldstr, "xml");
-            il.Emit(OpCodes.Callvirt, typeof(String).GetMethod("Contains"));
-            il.Emit(OpCodes.Brtrue_S, label3);// stack is empty
-            il.Emit(OpCodes.Ldloc_0);
-            il.Emit(OpCodes.Callvirt, typeof(IOwinRequest).GetProperty("Headers").GetGetMethod());
-            il.Emit(OpCodes.Ldstr, "format");
-            il.Emit(OpCodes.Callvirt, typeof(IReadableStringCollection).GetMethod("Get"));
-            il.Emit(OpCodes.Ldstr, "xml");
-            il.Emit(OpCodes.Call, typeof(String).GetMethod("Equals", new[] { typeof(string), typeof(string) }));
-            il.Emit(OpCodes.Brfalse_S, label4);
+                il.MarkLabel(label6);// stack is empty,处理multipart/form-data
+                il.Emit(OpCodes.Ldloc_2);
+                il.Emit(OpCodes.Ldstr, "multipart/form-data");
+                il.Emit(OpCodes.Callvirt, typeof(String).GetMethod("Contains"));
+                il.Emit(OpCodes.Brfalse_S, label2);// stack is empty
+                il.Emit(OpCodes.Ldloc_S, (byte)4);
+                il.Emit(OpCodes.Newobj, typeof(MemoryStream).GetConstructor(new[] { typeof(byte[]) }));
+                il.Emit(OpCodes.Ldloc_2);
+                il.Emit(OpCodes.Ldloca_S, (byte)7);
+                il.Emit(OpCodes.Ldloca_S, (byte)8);
+                il.Emit(OpCodes.Call, typeof(HttpHelper).GetMethod("ParseFormData"));
+                il.Emit(OpCodes.Ldloc_S, (byte)6);
+                il.Emit(OpCodes.Ldloc_S, (byte)7);
+                il.Emit(OpCodes.Call, deserializer1);
+                if (typeof(IHasHttpFiles).IsAssignableFrom(type2))
+                {
+                    il.Emit(OpCodes.Ldloc_S, (byte)8);
+                    il.Emit(OpCodes.Callvirt, typeof(List<HttpFile>).GetProperty("Count").GetGetMethod());
+                    il.Emit(OpCodes.Brfalse_S, label7);
+                    il.Emit(OpCodes.Ldloc_S, (byte)6);
+                    il.Emit(OpCodes.Ldloc_S, (byte)8);
+                    il.Emit(OpCodes.Callvirt, typeof(IHasHttpFiles).GetProperty("HttpFiles").GetSetMethod());
+                    il.MarkLabel(label7);
+                }
+                il.Emit(OpCodes.Leave_S, next);// stack is empty
 
-            il.MarkLabel(label3);// stack is empty,处理json反序列化
-            il.Emit(OpCodes.Call, typeof(Encoding).GetProperty("UTF8").GetGetMethod());
-            il.Emit(OpCodes.Ldloc_S, (byte)4);
-            il.Emit(OpCodes.Callvirt, typeof(Encoding).GetMethod("GetString", new[] { typeof(byte[]) }));
-            il.Emit(OpCodes.Call, typeof(ServiceStack.Text.StringExtensions).GetMethod("FromXml", new[] { typeof(string) }).MakeGenericMethod(type2));
-            il.Emit(OpCodes.Stloc_S, (byte)6);
-            il.Emit(OpCodes.Leave_S, next);// stack is empty
+                il.MarkLabel(label2);// stack is empty,处理xml反序列化
+                il.Emit(OpCodes.Ldloc_2);
+                il.Emit(OpCodes.Ldstr, "xml");
+                il.Emit(OpCodes.Callvirt, typeof(String).GetMethod("Contains"));
+                il.Emit(OpCodes.Brtrue_S, label3);// stack is empty
+                il.Emit(OpCodes.Ldloc_0);
+                il.Emit(OpCodes.Callvirt, typeof(IOwinRequest).GetProperty("Headers").GetGetMethod());
+                il.Emit(OpCodes.Ldstr, "format");
+                il.Emit(OpCodes.Callvirt, typeof(IReadableStringCollection).GetMethod("Get"));
+                il.Emit(OpCodes.Ldstr, "xml");
+                il.Emit(OpCodes.Call, typeof(String).GetMethod("Equals", new[] { typeof(string), typeof(string) }));
+                il.Emit(OpCodes.Brfalse_S, label4);
 
-            il.MarkLabel(label4);// stack is empty
-            il.Emit(OpCodes.Call, typeof(Encoding).GetProperty("UTF8").GetGetMethod());
-            il.Emit(OpCodes.Ldloc_S, (byte)4);
-            il.Emit(OpCodes.Callvirt, typeof(Encoding).GetMethod("GetString", new[] { typeof(byte[]) }));
-            il.Emit(OpCodes.Call, typeof(ServiceStack.Text.StringExtensions).GetMethod("FromJson", new[] { typeof(string) }).MakeGenericMethod(type2));
-            il.Emit(OpCodes.Stloc_S, (byte)6);
-            il.Emit(OpCodes.Leave_S, next);// stack is empty
+                il.MarkLabel(label3);// stack is empty,处理json反序列化
+                il.Emit(OpCodes.Call, typeof(Encoding).GetProperty("UTF8").GetGetMethod());
+                il.Emit(OpCodes.Ldloc_S, (byte)4);
+                il.Emit(OpCodes.Callvirt, typeof(Encoding).GetMethod("GetString", new[] { typeof(byte[]) }));
+                il.Emit(OpCodes.Call, typeof(ServiceStack.Text.StringExtensions).GetMethod("FromXml", new[] { typeof(string) }).MakeGenericMethod(type2));
+                il.Emit(OpCodes.Stloc_S, (byte)6);
+                il.Emit(OpCodes.Leave_S, next);// stack is empty
 
-            il.BeginCatchBlock(typeof(Exception)); // stack is Exception
+                il.MarkLabel(label4);// stack is empty
+                il.Emit(OpCodes.Call, typeof(Encoding).GetProperty("UTF8").GetGetMethod());
+                il.Emit(OpCodes.Ldloc_S, (byte)4);
+                il.Emit(OpCodes.Callvirt, typeof(Encoding).GetMethod("GetString", new[] { typeof(byte[]) }));
+                il.Emit(OpCodes.Call, typeof(ServiceStack.Text.StringExtensions).GetMethod("FromJson", new[] { typeof(string) }).MakeGenericMethod(type2));
+                il.Emit(OpCodes.Stloc_S, (byte)6);
+                il.Emit(OpCodes.Leave_S, next);// stack is empty
+
+                il.BeginCatchBlock(typeof(Exception)); // stack is Exception
 #if DEBUG
             il.Emit(OpCodes.Callvirt, typeof(Object).GetMethod("ToString"));
             il.Emit(OpCodes.Ldnull);
             il.Emit(OpCodes.Call, typeof(Debug).GetMethod("Write"));
 #endif
-            il.EndExceptionBlock();
-
+                il.EndExceptionBlock();
+            }
             il.MarkLabel(label1);// stack is empty
             il.Emit(OpCodes.Ldsfld, typeof(HttpHelper).GetField("cancelTask"));
             il.Emit(OpCodes.Stloc_S, (byte)10);//store in local variable
