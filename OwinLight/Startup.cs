@@ -298,6 +298,12 @@ namespace OwinLight
                 var response = c.Response;
                 if (request.Path.HasValue)
                 {
+                    if (request.Method == "OPTIONS")
+                    {
+                        response.ContentLength = 0;
+                        HttpHelper.SetResponseHeaders(response, responseheaders);
+                        return HttpHelper.completeTask;
+                    }
                     string path = request.Path.Value;
                     try
                     {
@@ -312,6 +318,7 @@ namespace OwinLight
                         {
                             if (r.TryGetValue(path, out d))
                             {
+
                                 return d(c);
                             }
                         }
@@ -364,7 +371,5 @@ namespace OwinLight
                 }
             });
         }
-
-
     }
 }
